@@ -36,7 +36,7 @@ namespace picview
             InitializeComponent();
 
             //Form
-            FormBorderStyle = FormBorderStyle.None;
+            //FormBorderStyle = FormBorderStyle.None;
             MaximizeBox = false;
             Height = 200;
             Width = 250;
@@ -363,26 +363,41 @@ namespace picview
                                 //変更前からの拡大率（1超過なら拡大、1未満なら縮小）。例えば150→200であれば200/150=1.33倍
                                 double ratio = zoomRatioArray[zoomIndex] / (double)zoomRatioArray[zoomIndexCurrent];
 
+                                //クライアント領域が変更されている可能性があるので再度取得
+                                pointMouse = panel.PointToClient(Cursor.Position);
+
+                                //変更後の位置
+                                double Sx = pointMouseAbsX;
+                                double Sxdash = Sx * ratio;
+                                double Cxdash = pointMouse.X;
+
+                                double Sy = pointMouseAbsY;
+                                double Sydash = Sy * ratio;
+                                double Cydash = pointMouse.Y;
+
                                 //pictureBox内のマウス位置は変更前後で同じになるようにスクロールバーの位置を設定
-                                double nextPointScrollX = -pointscroll.X + pointMouseAbsX * (ratio - 1);
-                                double nextPointScrollY = -pointscroll.Y + pointMouseAbsY * (ratio - 1);
+                                double nextPointScrollX = Sxdash - Cxdash;
+                                double nextPointScrollY = Sydash - Cydash;
                                 panel.AutoScrollPosition = new Point((int)nextPointScrollX, (int)nextPointScrollY);
+
+
+
                                 /*
-                                               S'
+                                               Sx'
                                     |<────────────────│    ↓変更後のpictureBox
                                     ┌───────────────────────────────────── 
-                                    │          S      
+                                    │          Sx      
                                     │   |<────────────│    ↓変更前のpictureBox
-                                    │   ┌──────────────────────────────┐
-                                    │dB │   B   │     │                │  B      = - pointscroll.X(変更前)  取得時は負
-                                    ├──>├──────>┌─────────────┐        │  B + dB = nextPointScrollX(変更後) 設定するときは正
-                                    │   │       │     │       │        │
-                                    │   │       │     │       │        │  S'     = S * ratio
-                                    │   │       │  C  │       │        │         = (B + C) * ratio
-                                    │   │       ├────>*       │        │         = pointMouseAbsX * ratio
-                                    │   │       │             │        │  dB     = S' - S
-                                    │   │       │ Client Area │        │         = pointMouseAbsX * ratio - pointMouseAbsX
-                                    │   │       │ (View Area) │        │         = pointMouseAbsX * (ratio - 1)
+                                    │   ┌──────────────────────────────┐  B   = - pointscroll.X(変更前)  取得時は負
+                                    │   │             │                │  B'  = nextPointScrollX(変更後) 設定するときは正  
+                                    │   │       ┌─────────────┐        │  Cx  = pointMouse.X
+                                    │   │  Bx'  │ Cx' │       │        │  Sx  = Bx + Cx = pointMouseAbsX
+                                    ├───├──────>├────>│       │        │  Sx' = Sx * ratio
+                                    │   │  Bx   │ Cx  │       │        │      = pointMouseAbsX * ratio
+                                    │   ├──────>├────>*       │        │
+                                    │   │       │             │        │  Bx' = Sx' - Cx'
+                                    │   │       │ Client Area │        │
+                                    │   │       │ (View Area) │        │
                                     │   │       └─────────────┘        │
                                 */
                             }
@@ -652,14 +667,31 @@ namespace picview
                 if (imageWidth / imageHeight > workareaWidth / workareaHeight)//横長（高さが高いほど、つまり縦長ほど値が小さくなる。値が大きいということは横長）
                 {
                     double w = workareaWidth;//幅は作業領域幅と同じまでとする
-                    double h = Math.Floor(imageHeight * workareaWidth / imageWidth);//高さは比率で計算
+                    double h;
+                    if (isFileChanged)
+                    {
+                        h = Math.Floor(imageHeight * workareaWidth / imageWidth);//高さは比率で計算
+                    }
+                    else
+                    {
+                        h = imageHeight <= workareaHeight ? imageHeight : workareaHeight;
+                    }
                     nextClientSize = new Size((int)w, (int)h);
                     isFixed = true;
                 }
                 else//縦長
                 {
                     double h = workareaHeight;//高さは作業領域高さと同じまでとする
-                    double w = Math.Floor(imageWidth * workareaHeight / imageHeight);//幅は比率で計算
+                    double w;
+                    if (isFileChanged)
+                    {
+                        w = Math.Floor(imageWidth * workareaHeight / imageHeight);//幅は比率で計算
+                    }
+                    else
+                    {
+                        w = imageWidth <= workareaWidth ? imageWidth : workareaWidth;
+                    }
+
                     nextClientSize = new Size((int)w, (int)h);
                     isFixed = true;
                 }
