@@ -30,6 +30,8 @@ namespace picview
         private WindowSizeMethod.BorderWidth border = new WindowSizeMethod.BorderWidth();
         //タイトルバーの有無
         private bool isTitlebarExist => FormBorderStyle != FormBorderStyle.None;
+        //初期状態では常に100%表示
+        private bool force100per = false;
 
         public picview()
         {
@@ -232,6 +234,22 @@ namespace picview
 
                     //境界再確認
                     border = WindowSizeMethod.GetBorderWidth(this);
+                };
+                contextMenuStrip.Items.Add(toolStripMenuItem);
+
+                //最前面表示
+                toolStripMenuItem = new ToolStripMenuItem { Text = "最前面表示", Checked = TopMost };
+                toolStripMenuItem.Click += (sender1, e1) =>
+                {
+                    TopMost = !TopMost;
+                };
+                contextMenuStrip.Items.Add(toolStripMenuItem);
+
+                //常に100%表示
+                toolStripMenuItem = new ToolStripMenuItem { Text = "初期倍率100%固定", Checked = force100per };
+                toolStripMenuItem.Click += (sender1, e1) =>
+                {
+                    force100per = !force100per;
                 };
                 contextMenuStrip.Items.Add(toolStripMenuItem);
 
@@ -463,7 +481,9 @@ namespace picview
                             //ウィンドウ位置調整
                             AutoAdjustLocation(ClientSize, Cursor.Position);
 
-                            baseSize = ClientSize;
+                            //タイトル変更
+                            ChangeTitle();
+
                             break;
                         }
                     }
@@ -499,9 +519,6 @@ namespace picview
 
                         //ウィンドウ位置調整
                         AutoAdjustLocation(ClientSize, clientAreaCenter);
-
-                        //ベースサイズ変更
-                        baseSize = ClientSize;
 
                         //表示をリフレッシュ
                         pictureBox.Refresh();
@@ -555,17 +572,17 @@ namespace picview
             {
                 Text += " (横" + pictureBox.Image.Width.ToString() + " x 縦" + pictureBox.Image.Height.ToString() + ")";
 
-                int percent;
+                double percent;
                 if (pictureBox.Image.Width / pictureBox.Image.Height > pictureBox.Width / pictureBox.Height)//横長
                 {
-                    percent = (int)((double)pictureBox.Width / (double)pictureBox.Image.Width * 100);
+                    percent = (double)pictureBox.Width / (double)pictureBox.Image.Width * 100.0;
                 }
                 else//縦長
                 {
-                    percent = (int)((double)pictureBox.Height / (double)pictureBox.Image.Height * 100);
+                    percent = (double)pictureBox.Height / (double)pictureBox.Image.Height * 100.0;
                 }
 
-                Text += " " + percent.ToString() + "%";
+                Text += " " + ((int)Math.Round(percent)).ToString() + "%";
             }
         }
 
@@ -636,9 +653,6 @@ namespace picview
                             AutoAdjustLocation(ClientSize, Cursor.Position);
                         }
                     }
-
-                    //ベースサイズ設定
-                    baseSize = ClientSize;
                 }
             }
         }
@@ -656,55 +670,82 @@ namespace picview
             double workareaHeight = workarea.Height - border.Height;
             double workareaWidth = workarea.Width - border.Width;
 
-            //画像サイズ
-            Size nextClientSize = size;//変更後の画像サイズ。一旦希望サイズで初期化
-            double imageHeight = nextClientSize.Height;
-            double imageWidth = nextClientSize.Width;
+            //変更後の画像サイズ。一旦希望サイズで初期化
+            double imageHeight = size.Height;
+            double imageWidth = size.Width;
 
             //画面内に収まるようにサイズ調整
             if (imageHeight > workareaHeight || imageWidth > workareaWidth)//画面内に収まらない場合
             {
+                isFixed = true;
+
+                double w, h, wbase, hbase;
                 if (imageWidth / imageHeight > workareaWidth / workareaHeight)//横長（高さが高いほど、つまり縦長ほど値が小さくなる。値が大きいということは横長）
                 {
-                    double w = workareaWidth;//幅は作業領域幅と同じまでとする
-                    double h;
+                    w = workareaWidth;//幅は作業領域幅と同じまでとする
                     if (isFileChanged)
                     {
-                        h = Math.Floor(imageHeight * workareaWidth / imageWidth);//高さは比率で計算
+                        hbase = h = Math.Floor(imageHeight * workareaWidth / imageWidth);//高さは比率で計算
+                        if (force100per)
+                        {
+                            h = imageHeight <= workareaHeight ? imageHeight : workareaHeight;
+                            baseSize = size;
+                        }
+                        else
+                        {
+                            baseSize = new Size((int)w, (int)hbase);
+                        }
                     }
                     else
                     {
                         h = imageHeight <= workareaHeight ? imageHeight : workareaHeight;
                     }
-                    nextClientSize = new Size((int)w, (int)h);
-                    isFixed = true;
                 }
                 else//縦長
                 {
-                    double h = workareaHeight;//高さは作業領域高さと同じまでとする
-                    double w;
+                    h = workareaHeight;//高さは作業領域高さと同じまでとする
                     if (isFileChanged)
                     {
-                        w = Math.Floor(imageWidth * workareaHeight / imageHeight);//幅は比率で計算
+                        wbase = w = Math.Floor(imageWidth * workareaHeight / imageHeight);//幅は比率で計算
+                        if (force100per)
+                        {
+                            w = imageWidth <= workareaWidth ? imageWidth : workareaWidth;
+                            baseSize = size;
+                        }
+                        else
+                        {
+                            baseSize = new Size((int)wbase, (int)h);
+                        }
                     }
                     else
                     {
                         w = imageWidth <= workareaWidth ? imageWidth : workareaWidth;
                     }
-
-                    nextClientSize = new Size((int)w, (int)h);
-                    isFixed = true;
                 }
+                ClientSize = new Size((int)w, (int)h);
             }
-
-            //フォームのクライアントサイズ
-            ClientSize = nextClientSize;
+            else
+            {
+                if (isFileChanged)
+                {
+                    baseSize = size;
+                }
+                ClientSize = size;
+            }
 
             if (isFileChanged)//ファイル変更時
             {
-                //画面内に収まる場合は100%表示なのでクライアントサイズと同じサイズとする。
-                //画面内に収まらない場合でも、画像をクライアントサイズまで縮小して表示。
-                pictureBox.Dock = DockStyle.Fill;
+                if (!force100per)//100%固定でない場合
+                {
+                    //画面内に収まる場合は100%表示なのでクライアントサイズと同じサイズとする。
+                    //画面内に収まらない場合でも、画像をクライアントサイズまで縮小して表示。
+                    pictureBox.Dock = DockStyle.Fill;
+                }
+                else//100%固定の場合
+                {
+                    pictureBox.Dock = DockStyle.None;
+                    pictureBox.Size = size;
+                }
             }
             else if (!isFixed)//縮小してない場合（画面内に収まる場合）
             {
