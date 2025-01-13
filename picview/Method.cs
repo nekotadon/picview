@@ -12,7 +12,7 @@ namespace picview
     public static class ImageUtil
     {
         //透過色取得
-        public static Color GetTransparentColor(Image image)
+        public static Color GetTransparentColor(Image image, string filepath = "")
         {
             // 画像がGIFの場合
             if (image.RawFormat.Equals(ImageFormat.Gif))
@@ -28,6 +28,76 @@ namespace picview
                         {
                             Color color = palette.Entries[i];
                             return Color.FromArgb(255, color.R, color.G, color.B); // 透過色を返す
+                        }
+                    }
+                }
+            }
+
+            //IHDRチャンクとtRNSチャンクから確認
+            if (image.RawFormat.Equals(ImageFormat.Png) && filepath != "")
+            {
+                if (File.Exists(filepath))
+                {
+                    using (FileStream fs = new FileStream(filepath, FileMode.Open, FileAccess.Read))
+                    {
+                        BinaryReader reader = new BinaryReader(fs);
+
+                        // PNGファイルのシグネチャを確認
+                        byte[] signature = reader.ReadBytes(8);
+                        if (BitConverter.ToString(signature) == "89-50-4E-47-0D-0A-1A-0A")
+                        {
+                            //チャング
+                            byte[] buffer;
+                            int colorType = -1;
+                            while (fs.Position < fs.Length)
+                            {
+                                //チャングのデータ長
+                                buffer = reader.ReadBytes(4);
+                                uint chunkLength = BitConverter.ToUInt32(buffer.Reverse().ToArray(), 0);
+
+                                //チャンクの種類
+                                string chunkType = new string(reader.ReadChars(4));
+
+                                if (chunkType == "IHDR")
+                                {
+                                    //画像の幅(4),画像の高さ(4),色深度(1バイト),カラータイプ(1),圧縮形式(1),フィルタ形式(1),インターレース形式(1),CRC(4)
+                                    buffer = reader.ReadBytes(17);
+                                    colorType = buffer[9];
+                                }
+                                else if (chunkType == "tRNS")
+                                {
+                                    buffer = reader.ReadBytes((int)chunkLength + 4);
+
+                                    if (colorType == 3)//インデックスカラー
+                                    {
+                                        //処理が大変なので対応しない
+                                    }
+                                    else if (colorType == 0)//グレースケール
+                                    {
+                                        if (buffer.Length >= 2)
+                                        {
+                                            int gray = BitConverter.ToUInt16(buffer.Take(2).Reverse().ToArray(), 0);
+                                            return Color.FromArgb(0, gray, gray, gray);//グレースケールの透過色
+                                        }
+                                    }
+                                    else if (colorType == 2)//フルカラー
+                                    {
+                                        if (buffer.Length >= 6)
+                                        {
+                                            int r = BitConverter.ToUInt16(buffer.Take(2).Reverse().ToArray(), 0);
+                                            int g = BitConverter.ToUInt16(buffer.Skip(2).Take(2).Reverse().ToArray(), 0);
+                                            int b = BitConverter.ToUInt16(buffer.Skip(4).Take(2).Reverse().ToArray(), 0);
+                                            return Color.FromArgb(0, r, g, b);//RGBの透過色
+                                        }
+                                    }
+                                    break;
+                                }
+                                else
+                                {
+                                    // 次のチャンクへ
+                                    fs.Seek(chunkLength + 4, SeekOrigin.Current);//データ長+CRC4バイト分移動
+                                }
+                            }
                         }
                     }
                 }

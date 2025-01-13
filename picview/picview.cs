@@ -22,8 +22,8 @@ namespace picview
         //表示する画像ファイルのフルパス
         private string filepath = "";
         //表示する画像の画像サイズ
-        private Size fileImageSize = new Size(100, 100);//ファイルの本当のサイズ
-        private Size zoom100perSize = new Size(100, 100);//拡大率100%での画面サイズ
+        private Size fileImageSizeAbs = new Size(100, 100);//ファイルの本当のサイズ（回転によらず固定）
+        private Size fileImageSize = new Size(100, 100);//ファイルの本当のサイズ（回転時は縦横反転）
         //表示する画像の情報
         private int indexOfFile = -1;//同じフォルダ内で何番目のファイルか
         private int countOfFiles = -1;//同じフォルダ内のファイル数
@@ -448,7 +448,7 @@ namespace picview
                     double currentH = 1;
                     if (!normal)
                     {
-                        currentH = zoom100perSize.Height * currentZoomRatio;
+                        currentH = fileImageSize.Height * currentZoomRatio;
                         int currentRatio = (int)Math.Round(currentH / zoomBaseSize.Height * 100.0);
 
                         if (currentRatio <= zoomRatioArray[0])
@@ -533,9 +533,15 @@ namespace picview
                         */
 
 
+                        //変更後のサイズ
+                        if (zoomIndex < 0) return;
+                        double zwidth = (double)zoomBaseSize.Width * (double)zoomRatioArray[zoomIndex] / 100.0;
+                        double zheight = (double)zoomBaseSize.Height * (double)zoomRatioArray[zoomIndex] / 100.0;
+                        Size size = new Size((int)zwidth, (int)zheight);
+
                         //画面内に収まるようにクライアントサイズとpictureBoxサイズ調整。スクリーンに収まりきらない場合はtrueを返す
                         isZoomIndexReset = false;
-                        AutoAdjustSize(AjastType.Zoom);
+                        AutoAdjustSize(size);
                         isZoomIndexReset = true;
 
                         //ウィンドウ位置調整
@@ -658,9 +664,18 @@ namespace picview
                         //拡大率再計算不要
                         isNotCalcScale = true;
 
-                        //画面内に収まるようにクライアントサイズとpictureBoxサイズ調整。スクリーンに収まりきらない場合はtrueを返す
+                        //基準サイズ回転
+                        zoomBaseSize = new Size(zoomBaseSize.Height, zoomBaseSize.Width);
+                        fileImageSize = new Size(fileImageSize.Height, fileImageSize.Width);
+
+                        //変更後のサイズは現在のサイズそのまま
+                        double zwidth = (double)fileImageSize.Width * currentZoomRatio;
+                        double zheight = (double)fileImageSize.Height * currentZoomRatio;
+                        Size size = new Size((int)zwidth, (int)zheight);
+
+                        //サイズ調整
                         isZoomIndexReset = false;
-                        AutoAdjustSize(AjastType.Rotate);
+                        AutoAdjustSize(size);
                         isZoomIndexReset = true;
 
                         //ウィンドウ位置調整
@@ -790,12 +805,12 @@ namespace picview
         //現在の拡大率
         private double GetScale()
         {
-            if (zoom100perSize.Width == 0) return 1;
-            if (zoom100perSize.Height == 0) return 1;
+            if (fileImageSize.Width == 0) return 1;
+            if (fileImageSize.Height == 0) return 1;
 
             //拡大率
-            double rateX = (double)pictureBox.Width / zoom100perSize.Width;
-            double rateY = (double)pictureBox.Height / zoom100perSize.Height;
+            double rateX = (double)pictureBox.Width / fileImageSize.Width;
+            double rateY = (double)pictureBox.Height / fileImageSize.Height;
             return Math.Min(rateX, rateY);
         }
 
@@ -806,7 +821,7 @@ namespace picview
             if (isImageExist)
             {
                 //画像サイズ
-                Text += " (横" + fileImageSize.Width.ToString() + " x 縦" + fileImageSize.Height.ToString() + ")";
+                Text += " (横" + fileImageSizeAbs.Width.ToString() + " x 縦" + fileImageSizeAbs.Height.ToString() + ")";
 
                 //拡大率
                 if (!isNotCalcScale)
@@ -879,11 +894,10 @@ namespace picview
                     //読み込みができた場合
                     if (newImage != null)
                     {
-
                         //透過色が有効な画像フォーマットの場合で透過色がある場合
                         if (ext == ".gif" || ext == ".png")
                         {
-                            Color transColor = ImageUtil.GetTransparentColor(newImage);
+                            Color transColor = ImageUtil.GetTransparentColor(newImage, filepath);
 
                             //背景を透明にする
                             if (transColor != Color.Empty)
@@ -893,7 +907,7 @@ namespace picview
                         }
 
                         //画像サイズ取得
-                        fileImageSize = new Size(newImage.Width, newImage.Height);
+                        fileImageSizeAbs = new Size(newImage.Width, newImage.Height);
 
                         //アニメーションgifかどうか
                         bool animegif = ext == ".gif" && newImage.RawFormat.Equals(ImageFormat.Gif) && ImageAnimator.CanAnimate(newImage);
@@ -915,15 +929,18 @@ namespace picview
                             ushort orientation = ImageUtil.GetExifOrientation(newImage);
                             RotateFlipType type = ImageUtil.GetRotateFlipType(orientation);
                             pictureBox.Image.RotateFlip(type);
-                            fileImageSize = new Size(newImage.Width, newImage.Height);
+                            fileImageSizeAbs = new Size(newImage.Width, newImage.Height);
                         }
-                        zoom100perSize = fileImageSize;
+                        fileImageSize = fileImageSizeAbs;
+
+                        //拡大率100%のときのサイズ
+                        zoomBaseSize = force100per ? fileImageSizeAbs : GetFixedSize(fileImageSizeAbs);
 
                         //サイズ調整
                         if (ajust)
                         {
                             //画面内に収まるようにクライアントサイズとpictureBoxサイズ調整。スクリーンに収まりきらない場合はtrueを返す
-                            AutoAdjustSize(AjastType.FileChange);
+                            AutoAdjustSize(zoomBaseSize, !force100per);
 
                             //起動時にマウス位置を変える場合
                             Display.MoveCursorToWorkAreaCenter(this, kidouji && mouseCenterMove);
@@ -943,42 +960,14 @@ namespace picview
             Zoom,
             Rotate
         }
-        private bool AutoAdjustSize(AjastType type)
+
+        private Size GetFixedSize(Size targetSize)
         {
-            if (!isImageExist) return false;
-
-            //回転指示の場合はまずベースサイズと拡大率を回転
-            if (type == AjastType.Rotate)
+            //高さや幅がない場合
+            if (targetSize.Height == 0 || targetSize.Width == 0)
             {
-                zoomBaseSize = new Size(zoomBaseSize.Height, zoomBaseSize.Width);
-                zoom100perSize = new Size(zoom100perSize.Height, zoom100perSize.Width);
+                return targetSize;
             }
-
-            //画像の狙いサイズを計算
-            Size size;
-            if (type == AjastType.FileChange)//新規ファイル読み込み時
-            {
-                //画像サイズそのまま
-                size = fileImageSize;
-            }
-            else if (type == AjastType.Rotate)
-            {
-                //現在のサイズそのまま
-                double zwidth = (double)zoom100perSize.Width * currentZoomRatio;
-                double zheight = (double)zoom100perSize.Height * currentZoomRatio;
-                size = new Size((int)zwidth, (int)zheight);
-            }
-            else
-            {
-                //基準ズームサイズ
-                if (zoomIndex < 0) return false;
-                double zwidth = (double)zoomBaseSize.Width * (double)zoomRatioArray[zoomIndex] / 100.0;
-                double zheight = (double)zoomBaseSize.Height * (double)zoomRatioArray[zoomIndex] / 100.0;
-                size = new Size((int)zwidth, (int)zheight);
-            }
-
-            //縮小したか
-            bool isFixed = false;
 
             //作業領域（ディスプレイのデスクトップ領域からタスクバーをのぞいた領域）の高さと幅を取得
             Rectangle workarea = Screen.GetWorkingArea(this);
@@ -987,97 +976,61 @@ namespace picview
             double workareaHeight = workarea.Height - border.Height;
             double workareaWidth = workarea.Width - border.Width;
 
-            //変更後の画像サイズ。一旦希望サイズで初期化
-            double imageHeight = size.Height;
-            double imageWidth = size.Width;
-
-            //画面内に収まるようにサイズ調整
-            if (imageHeight > workareaHeight || imageWidth > workareaWidth)//画面内に収まらない場合
+            if (targetSize.Height <= workareaHeight && targetSize.Width <= workareaWidth)
             {
-                isFixed = true;
-
-                double w, h, wbase, hbase;
-                if ((double)imageWidth / (double)imageHeight > (double)workareaWidth / (double)workareaHeight)//横長（高さが高いほど、つまり縦長ほど値が小さくなる。値が大きいということは横長）
-                {
-                    w = workareaWidth;//幅は作業領域幅と同じまでとする
-                    if (type == AjastType.FileChange)
-                    {
-                        hbase = h = Math.Floor((double)imageHeight * (double)workareaWidth / (double)imageWidth);//高さは比率で計算
-                        if (force100per)
-                        {
-                            h = imageHeight <= workareaHeight ? imageHeight : workareaHeight;
-                            zoomBaseSize = size;
-                        }
-                        else
-                        {
-                            zoomBaseSize = new Size((int)w, (int)hbase);
-                        }
-                    }
-                    else
-                    {
-                        h = imageHeight <= workareaHeight ? imageHeight : workareaHeight;
-                    }
-                }
-                else//縦長
-                {
-                    h = workareaHeight;//高さは作業領域高さと同じまでとする
-                    if (type == AjastType.FileChange)
-                    {
-                        wbase = w = Math.Floor((double)imageWidth * (double)workareaHeight / (double)imageHeight);//幅は比率で計算
-                        if (force100per)
-                        {
-                            w = imageWidth <= workareaWidth ? imageWidth : workareaWidth;
-                            zoomBaseSize = size;
-                        }
-                        else
-                        {
-                            zoomBaseSize = new Size((int)wbase, (int)h);
-                        }
-                    }
-                    else
-                    {
-                        w = imageWidth <= workareaWidth ? imageWidth : workareaWidth;
-                    }
-                }
-                ClientSize = new Size((int)w, (int)h);
+                //画面に収まる場合
+                return targetSize;
             }
             else
             {
-                if (type == AjastType.FileChange)
-                {
-                    zoomBaseSize = size;
-                }
-                ClientSize = size;
+                //画面に収まらない場合
+                double rateX = workareaWidth / (double)targetSize.Width;
+                double rateY = workareaHeight / (double)targetSize.Height;
+                double rate = Math.Min(rateX, rateY);
+                double w = (double)targetSize.Width * rate;
+                double h = (double)targetSize.Height * rate;
+                return new Size((int)w, (int)h);
+            }
+        }
+
+        private Size GetOverlappingSize(Size targetSize)
+        {
+            //高さや幅がない場合
+            if (targetSize.Height == 0 || targetSize.Width == 0)
+            {
+                return targetSize;
             }
 
-            if (type == AjastType.FileChange)//ファイル変更時
+            //作業領域（ディスプレイのデスクトップ領域からタスクバーをのぞいた領域）の高さと幅を取得
+            Rectangle workarea = Screen.GetWorkingArea(this);
+
+            //作業領域からウィンドウの外枠の幅を引く（画像が表示できる最大サイズの確認）
+            double workareaHeight = workarea.Height - border.Height;
+            double workareaWidth = workarea.Width - border.Width;
+
+            return new Size(Math.Min(targetSize.Width, (int)workareaWidth), Math.Min(targetSize.Height, (int)workareaHeight));
+        }
+
+        private void AutoAdjustSize(Size size, bool fix = false)//@@@
+        {
+            if (!isImageExist) return;
+
+            //修正後のサイズを計算
+            Size fixedSize = GetOverlappingSize(size);
+
+            //クライアント領域のサイズ変更
+            ClientSize = fixedSize;
+
+            //PictureBoxサイズ変更
+            if (fix || fixedSize == size)
             {
-                if (!force100per)//100%固定でない場合
-                {
-                    //画面内に収まる場合は100%表示なのでクライアントサイズと同じサイズとする。
-                    //画面内に収まらない場合でも、画像をクライアントサイズまで縮小して表示。
-                    pictureBox.Dock = DockStyle.Fill;
-                }
-                else//100%固定の場合
-                {
-                    pictureBox.Dock = DockStyle.None;
-                    pictureBox.Size = size;
-                }
-            }
-            else if (!isFixed)//縮小してない場合（画面内に収まる場合）
-            {
-                //画面内に収まる場合は100%表示なのでクライアントサイズと同じサイズとする。
                 pictureBox.Dock = DockStyle.Fill;
             }
             else
             {
-                //ファイル変更時ではない場合、つまりホイールによる拡大縮小時で
-                //かつ画面に収まらない場合は局所的に拡大して表示するので、画像は希望サイズとする。
                 pictureBox.Dock = DockStyle.None;
                 pictureBox.Size = size;
             }
-
-            return isFixed;
         }
 
         //ウィンドウ位置調整
