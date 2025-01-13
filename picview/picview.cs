@@ -313,23 +313,6 @@ namespace picview
                 ToolStripMenuItem toolStripMenuItem;
                 ToolStripMenuItem toolStripMenuItem_sub;
 
-                /*
-                //透過色に指定してpng保存（サブメニュー）
-                ToolStripMenuItem toolStripMenuItem_PngTrans1 = new ToolStripMenuItem { Text = "別名で保存", Enabled = pictureBox.Image != null };
-                toolStripMenuItem_PngTrans1.Click += (sender1, e1) => SetPngTrans(false);
-                contextMenuStrip.Items.Add(toolStripMenuItem_PngTrans1);
-
-                ToolStripMenuItem toolStripMenuItem_PngTrans2 = new ToolStripMenuItem { Text = "上書き保存", Enabled = pictureBox.Image != null };
-                toolStripMenuItem_PngTrans2.Click += (sender1, e1) => SetPngTrans(true);
-                contextMenuStrip.Items.Add(toolStripMenuItem_PngTrans2);
-
-                //透過色に指定してpng保存
-                ToolStripMenuItem toolStripMenuItem_PngTrans = new ToolStripMenuItem { Text = "透過色に指定してpng保存" };
-                toolStripMenuItem_PngTrans.DropDownItems.Add(toolStripMenuItem_PngTrans1);
-                toolStripMenuItem_PngTrans.DropDownItems.Add(toolStripMenuItem_PngTrans2);
-                contextMenuStrip.Items.Add(toolStripMenuItem_PngTrans);
-                */
-
                 //コピー
                 toolStripMenuItem = new ToolStripMenuItem { Text = "コピー(&C)", Enabled = isImageExist };
                 toolStripMenuItem.Click += (sender1, e1) => ImageAction(Keys.C);
@@ -398,9 +381,29 @@ namespace picview
                 }
                 contextMenuStrip.Items.Add(toolStripMenuItem);
 
+                //その他
+                toolStripMenuItem = new ToolStripMenuItem { Text = "その他" };
+                {
+                    //左上の色を透過色に設定
+                    toolStripMenuItem_sub = new ToolStripMenuItem { Text = "左上の色を透過色に設定", Enabled = pictureBox.Image != null };
+                    toolStripMenuItem_sub.Click += (sender1, e1) =>
+                    {
+                        SetTrans(GetImageTopLeftPositionColor());
+                    };
+                    toolStripMenuItem.DropDownItems.Add(toolStripMenuItem_sub);
+
+                    //ここの点の色を透過色に設定
+                    toolStripMenuItem_sub = new ToolStripMenuItem { Text = "ここの点の色を透過色に設定", Enabled = pictureBox.Image != null };
+                    toolStripMenuItem_sub.Click += (sender1, e1) =>
+                    {
+                        SetTrans(GetPoitColor(lastMousePosition));
+                    };
+                    toolStripMenuItem.DropDownItems.Add(toolStripMenuItem_sub);
+                }
+                contextMenuStrip.Items.Add(toolStripMenuItem);
+
                 //セパレータ
                 contextMenuStrip.Items.Add(new ToolStripSeparator());
-
 
                 //終了
                 toolStripMenuItem = new ToolStripMenuItem { Text = "終了 Esc" };
@@ -901,34 +904,20 @@ namespace picview
                         //透過色が有効な画像フォーマットの場合で透過色がある場合
                         if (ext == ".gif" || ext == ".png")
                         {
-                            Color transColor = ImageUtil.GetTransparentColor(newImage, filepath);
+                            (bool isTrans, Color transColor) = ImageUtil.GetTransparentColor(newImage, filepath);
 
                             //背景を透明にする
-                            if (transColor != Color.Empty)
+                            if (isTrans)
                             {
-                                //透過色設定
-                                Color transColorFixed = transColor;
-                                int transR = transColor.R;
-                                int transG = transColor.G;
-                                int transB = transColor.B;
-                                if (transR == transB)
+                                //背景を透明にする
+                                if (transColor != Color.Empty)
                                 {
-                                    if (transR == 0)
-                                    {
-                                        transR = 1;
-                                    }
-                                    else if (transR == 255)
-                                    {
-                                        transR = 254;
-                                    }
-                                    else
-                                    {
-                                        transR++;
-                                    }
-                                    transColorFixed = Color.FromArgb(255, transR, transG, transB);
+                                    pictureBox.BackColor = panel.BackColor = TransparencyKey = ImageUtil.FixedTransparentColor(transColor);
                                 }
-
-                                pictureBox.BackColor = panel.BackColor = TransparencyKey = transColorFixed;
+                                else
+                                {
+                                    pictureBox.BackColor = panel.BackColor = TransparencyKey = Color.DarkGoldenrod;
+                                }
                             }
                         }
 
@@ -1263,47 +1252,116 @@ namespace picview
             }
         }
 
-        //透過色png作成
-        /*
-        private void SetPngTrans(bool add)
+        //指定位置の色を取得
+        private Color GetPoitColor(Point point)
         {
-            if (pictureBox.Image == null || !File.Exists(filepath))
-            {
-                return;
-            }
-
+            Color color = Color.Empty;
             using (Bitmap bitmap = new Bitmap(1, 1))
             {
                 using (Graphics graphics = Graphics.FromImage(bitmap))
                 {
-                    graphics.CopyFromScreen(lastMousePosition, new Point(0, 0), bitmap.Size);
-                    graphics.Dispose();
+                    graphics.CopyFromScreen(point, new Point(0, 0), bitmap.Size);
+                }
+                color = bitmap.GetPixel(0, 0);
+            }
+
+            return color;
+        }
+
+        //画像の左上の色を取得
+        private Color GetImageTopLeftPositionColor()
+        {
+            Color color = Color.Empty;
+            if (isImageExist)
+            {
+                using (Bitmap bitmap = new Bitmap(pictureBox.Image != null ? pictureBox.Image : animatedImage))
+                {
+                    color = bitmap.GetPixel(0, 0);
+                }
+            }
+
+            return color;
+        }
+
+        //透過色の設定
+        private void SetTrans(Color color)
+        {
+            if (pictureBox.Image == null || color == Color.Empty || color == null)
+            {
+                return;
+            }
+
+            //新しい画像を作成
+            Bitmap transbmp = new Bitmap(pictureBox.Image != null ? pictureBox.Image : animatedImage);
+
+            //透過色設定
+            transbmp.MakeTransparent(color);
+
+            //画像切り替え
+            pictureBox.Image.Dispose();
+            pictureBox.Image = transbmp;
+            pictureBox.BackColor = panel.BackColor = TransparencyKey = ImageUtil.FixedTransparentColor(color);
+
+            //保存確認
+            DialogResult result = MessageBox.Show("ファイルを保存しますか？", "確認", MessageBoxButtons.YesNoCancel);
+
+            //何が選択されたか調べる
+            if (result == DialogResult.Yes)
+            {
+                bool otherName = false;
+                if (Path.GetExtension(filepath).ToLower() == ".png")
+                {
+                    result = MessageBox.Show("上書きしますか？", "確認", MessageBoxButtons.YesNoCancel);
+                    if (result == DialogResult.Yes)
+                    {
+                        //上書き保存
+                        transbmp.Save(filepath, System.Drawing.Imaging.ImageFormat.Png);
+
+                        //開きなおす
+                        ChangeFile(filepath, false);
+                    }
+                    else if (result == DialogResult.No)
+                    {
+                        otherName = true;
+                    }
+                }
+                else
+                {
+                    string newfile = Path.GetDirectoryName(filepath) + @"\" + Path.GetFileNameWithoutExtension(filepath) + ".png";
+                    if (!File.Exists(newfile))
+                    {
+                        //上書き保存
+                        transbmp.Save(newfile, System.Drawing.Imaging.ImageFormat.Png);
+
+                        //開きなおす
+                        ChangeFile(newfile, false);
+                    }
+                    else
+                    {
+                        otherName = true;
+                    }
                 }
 
-                using (Bitmap transbmp = new Bitmap(pictureBox.Image))
+                if (otherName)
                 {
-                    //出力ファイル名
-                    string folder = Path.GetDirectoryName(filepath);
-                    string name = Path.GetFileNameWithoutExtension(filepath);
-                    string outputfile = folder + @"\" + name + (add ? "" : DateTime.Now.ToString("_yyyyMMdd_HHmmss")) + ".png";
-
-                    //透過色設定
-                    transbmp.MakeTransparent(bitmap.GetPixel(0, 0));
-
-                    //画像切り替え
-                    if (pictureBox.Image != null)
+                    //別名保存
+                    SaveFileDialog saveFileDialog = new SaveFileDialog
                     {
-                        pictureBox.Image.Dispose();
+                        FileName = Path.GetFileNameWithoutExtension(filepath) + ".png",
+                        InitialDirectory = Path.GetDirectoryName(filepath),
+                        Filter = "PNGファイル(*.png)|*.png"
+                    };
+
+                    //ダイアログを表示する
+                    if (saveFileDialog.ShowDialog() == DialogResult.OK)
+                    {
+                        transbmp.Save(saveFileDialog.FileName, System.Drawing.Imaging.ImageFormat.Png);
+
+                        //開きなおす
+                        ChangeFile(saveFileDialog.FileName, false);
                     }
-                    pictureBox.Image = transbmp;
-
-                    //ファイル保存
-                    transbmp.Save(outputfile, System.Drawing.Imaging.ImageFormat.Png);
-
-                    ChangeFile(outputfile, false);
                 }
             }
         }
-        */
     }
 }

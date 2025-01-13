@@ -12,8 +12,9 @@ namespace picview
     public static class ImageUtil
     {
         //透過色取得
-        public static Color GetTransparentColor(Image image, string filepath = "")
+        public static (bool isTrans, Color transColor) GetTransparentColor(Image image, string filepath = "")
         {
+            bool ret = false;
             // 画像がGIFの場合
             //Graphic Control Extensionから取得
             if (image.RawFormat.Equals(ImageFormat.Gif) && filepath != "")
@@ -40,7 +41,7 @@ namespace picview
                             //残りのヘッダー読み込み
                             if (!ReadCheck(7))
                             {
-                                return Color.Empty;
+                                return (false, Color.Empty);
                             }
 
                             //パレット個数
@@ -54,7 +55,7 @@ namespace picview
                             byte[] palettes = reader.ReadBytes(size * 3);
                             if (palettes.Length != size * 3)
                             {
-                                return Color.Empty;
+                                return (false, Color.Empty);
                             }
 
                             while (fs.Position < fs.Length)
@@ -73,11 +74,11 @@ namespace picview
                                 {
                                     if (!ReadCheck(6))
                                     {
-                                        return Color.Empty;
+                                        return (false, Color.Empty);
                                     }
                                     if ((buffer[1] & 0x01) == 0)
                                     {
-                                        return Color.Empty;
+                                        return (false, Color.Empty);
                                     }
 
                                     int index = buffer[4];
@@ -87,7 +88,7 @@ namespace picview
                                         int r = palettes[index * 3 + 0];
                                         int g = palettes[index * 3 + 1];
                                         int b = palettes[index * 3 + 2];
-                                        return Color.FromArgb(255, r, g, b);//RGBの透過色
+                                        return (true, Color.FromArgb(255, r, g, b));//RGBの透過色
                                     }
                                 }
                                 else if (BitConverter.ToString(buffer).StartsWith("2C"))//Image Block
@@ -95,7 +96,7 @@ namespace picview
                                     //Image Block Header
                                     if (!ReadCheck(8))
                                     {
-                                        return Color.Empty;
+                                        return (false, Color.Empty);
                                     }
                                     if ((buffer[7] & 0b10000000) != 0)
                                     {
@@ -116,7 +117,7 @@ namespace picview
                                     {
                                         if (!ReadCheck(1))
                                         {
-                                            return Color.Empty;
+                                            return (false, Color.Empty);
                                         }
                                         if (buffer[0] == 0)
                                         {
@@ -132,7 +133,7 @@ namespace picview
                                 {
                                     if (!ReadCheck(1))
                                     {
-                                        return Color.Empty;
+                                        return (false, Color.Empty);
                                     }
                                     fs.Seek(buffer[0] + 1, SeekOrigin.Current);
                                 }
@@ -140,7 +141,7 @@ namespace picview
                                 {
                                     if (!ReadCheck(13))
                                     {
-                                        return Color.Empty;
+                                        return (false, Color.Empty);
                                     }
 
                                     //Data
@@ -148,7 +149,7 @@ namespace picview
                                     {
                                         if (!ReadCheck(1))
                                         {
-                                            return Color.Empty;
+                                            return (false, Color.Empty);
                                         }
                                         if (buffer[0] == 0)
                                         {
@@ -164,7 +165,7 @@ namespace picview
                                 {
                                     if (!ReadCheck(12))
                                     {
-                                        return Color.Empty;
+                                        return (false, Color.Empty);
                                     }
 
                                     //Data
@@ -172,7 +173,7 @@ namespace picview
                                     {
                                         if (!ReadCheck(1))
                                         {
-                                            return Color.Empty;
+                                            return (false, Color.Empty);
                                         }
                                         if (buffer[0] == 0)
                                         {
@@ -186,7 +187,7 @@ namespace picview
                                 }
                                 else
                                 {
-                                    return Color.Empty;
+                                    return (false, Color.Empty);
                                 }
                             }
                         }
@@ -225,6 +226,10 @@ namespace picview
                                     //画像の幅(4),画像の高さ(4),色深度(1バイト),カラータイプ(1),圧縮形式(1),フィルタ形式(1),インターレース形式(1),CRC(4)
                                     buffer = reader.ReadBytes(17);
                                     colorType = buffer[9];
+                                    if (colorType == 4 || colorType == 6)//アルファ画像
+                                    {
+                                        ret = true;
+                                    }
                                 }
                                 else if (chunkType == "tRNS")
                                 {
@@ -239,7 +244,7 @@ namespace picview
                                         if (buffer.Length >= 2)
                                         {
                                             int gray = BitConverter.ToUInt16(buffer.Take(2).Reverse().ToArray(), 0);
-                                            return Color.FromArgb(255, gray, gray, gray);//グレースケールの透過色
+                                            return (true, Color.FromArgb(255, gray, gray, gray));//グレースケールの透過色
                                         }
                                     }
                                     else if (colorType == 2)//フルカラー
@@ -249,7 +254,7 @@ namespace picview
                                             int r = BitConverter.ToUInt16(buffer.Take(2).Reverse().ToArray(), 0);
                                             int g = BitConverter.ToUInt16(buffer.Skip(2).Take(2).Reverse().ToArray(), 0);
                                             int b = BitConverter.ToUInt16(buffer.Skip(4).Take(2).Reverse().ToArray(), 0);
-                                            return Color.FromArgb(255, r, g, b);//RGBの透過色
+                                            return (true, Color.FromArgb(255, r, g, b));//RGBの透過色
                                         }
                                     }
                                     break;
@@ -265,7 +270,37 @@ namespace picview
                 }
             }
 
-            return Color.Empty; // 透過色は設定されていない
+            return (ret, Color.Empty); // 透過色は設定されていない
+        }
+
+        //修正透過色の取得
+        public static Color FixedTransparentColor(Color transColor)
+        {
+            if (transColor != Color.Empty && transColor != null)
+            {
+                Color transColorFixed = transColor;
+                int transR = transColor.R;
+                int transG = transColor.G;
+                int transB = transColor.B;
+                if (transR == transB)
+                {
+                    if (transR == 0)
+                    {
+                        transR = 1;
+                    }
+                    else if (transR == 255)
+                    {
+                        transR = 254;
+                    }
+                    else
+                    {
+                        transR++;
+                    }
+                    transColorFixed = Color.FromArgb(255, transR, transG, transB);
+                }
+                return transColorFixed;
+            }
+            return Color.Empty;
         }
 
         //jpegの中の回転角度を確認
