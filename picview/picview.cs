@@ -23,7 +23,6 @@ namespace picview
         private string[] pictureExt = { ".bmp", ".jpg", ".jpeg", ".png", ".gif" };
         //画像サイズ
         private Size FileImageSize = new Size(100, 100);//ファイルの本当のサイズ
-        //アニメーションgifかどうか
         //表示拡大
         private int zoomIndex;//現在の配列番号
         private int[] zoomRatioArray = { };//拡大率の配列
@@ -272,6 +271,7 @@ namespace picview
                 //コンテキストメニュー作成@@@
                 contextMenuStrip = new ContextMenuStrip();
                 ToolStripMenuItem toolStripMenuItem;
+                ToolStripMenuItem toolStripMenuItem_sub;
 
                 /*
                 //透過色に指定してpng保存（サブメニュー）
@@ -289,37 +289,6 @@ namespace picview
                 toolStripMenuItem_PngTrans.DropDownItems.Add(toolStripMenuItem_PngTrans2);
                 contextMenuStrip.Items.Add(toolStripMenuItem_PngTrans);
                 */
-
-                //タイトルバー
-                toolStripMenuItem = new ToolStripMenuItem { Text = "タイトルバーの表示", Checked = isTitlebarExist };
-                toolStripMenuItem.Click += (sender1, e1) =>
-                {
-                    //タイトルバーの表示切替
-                    FormBorderStyle = isTitlebarExist ? FormBorderStyle.None : FormBorderStyle.Sizable;
-
-                    //境界再確認
-                    border = WindowSizeMethod.GetBorderWidth(this);
-                };
-                contextMenuStrip.Items.Add(toolStripMenuItem);
-
-                //最前面表示
-                toolStripMenuItem = new ToolStripMenuItem { Text = "最前面表示", Checked = TopMost };
-                toolStripMenuItem.Click += (sender1, e1) =>
-                {
-                    TopMost = !TopMost;
-                };
-                contextMenuStrip.Items.Add(toolStripMenuItem);
-
-                //常に100%表示
-                toolStripMenuItem = new ToolStripMenuItem { Text = "初期倍率100%固定", Checked = force100per };
-                toolStripMenuItem.Click += (sender1, e1) =>
-                {
-                    force100per = !force100per;
-                };
-                contextMenuStrip.Items.Add(toolStripMenuItem);
-
-                //セパレータ
-                contextMenuStrip.Items.Add(new ToolStripSeparator());
 
                 //コピー
                 toolStripMenuItem = new ToolStripMenuItem { Text = "コピー C", Enabled = isImageExist };
@@ -343,6 +312,43 @@ namespace picview
 
                 //セパレータ
                 contextMenuStrip.Items.Add(new ToolStripSeparator());
+
+                //設定
+                toolStripMenuItem = new ToolStripMenuItem { Text = "設定" };
+                {
+                    //タイトルバー
+                    toolStripMenuItem_sub = new ToolStripMenuItem { Text = "タイトルバーの表示", Checked = isTitlebarExist };
+                    toolStripMenuItem_sub.Click += (sender1, e1) =>
+                    {
+                        //タイトルバーの表示切替
+                        FormBorderStyle = isTitlebarExist ? FormBorderStyle.None : FormBorderStyle.Sizable;
+
+                        //境界再確認
+                        border = WindowSizeMethod.GetBorderWidth(this);
+                    };
+                    toolStripMenuItem.DropDownItems.Add(toolStripMenuItem_sub);
+
+                    //最前面表示
+                    toolStripMenuItem_sub = new ToolStripMenuItem { Text = "最前面表示", Checked = TopMost };
+                    toolStripMenuItem_sub.Click += (sender1, e1) =>
+                    {
+                        TopMost = !TopMost;
+                    };
+                    toolStripMenuItem.DropDownItems.Add(toolStripMenuItem_sub);
+
+                    //常に100%表示
+                    toolStripMenuItem_sub = new ToolStripMenuItem { Text = "初期倍率100%固定", Checked = force100per };
+                    toolStripMenuItem_sub.Click += (sender1, e1) =>
+                    {
+                        force100per = !force100per;
+                    };
+                    toolStripMenuItem.DropDownItems.Add(toolStripMenuItem_sub);
+                }
+                contextMenuStrip.Items.Add(toolStripMenuItem);
+
+                //セパレータ
+                contextMenuStrip.Items.Add(new ToolStripSeparator());
+
 
                 //終了
                 toolStripMenuItem = new ToolStripMenuItem { Text = "終了 Esc" };
@@ -607,13 +613,65 @@ namespace picview
                         }
                         break;
                     case Keys.C://コピー
-                        if (pictureBox.Image != null)
+                        if (isAnimationProcessing)
                         {
-                            Clipboard.SetImage(pictureBox.Image);
+                            if (animatedImage != null)
+                            {
+                                //フレーム数確認
+                                FrameDimension dimension = new FrameDimension(animatedImage.FrameDimensionsList[0]);
+                                int frameCount = animatedImage.GetFrameCount(dimension);//@@@
+                                if (frameCount > 0)
+                                {
+                                    //コンテキストメニュー作成
+                                    contextMenuStrip = new ContextMenuStrip();
+                                    for (int i = 0; i < frameCount; i++)
+                                    {
+                                        //iフレーム目をコピーするメニュー
+                                        ToolStripMenuItem toolStripMenuItem = new ToolStripMenuItem { Text = "フレーム" + (i + 1).ToString(), Name = "Frame" + i.ToString() };
+                                        toolStripMenuItem.Click += (sender1, e1) =>
+                                        {
+                                            var item = (ToolStripMenuItem)sender1;
+                                            string name = item.Name.Substring("Frame".Length);
+                                            if (int.TryParse(name, out int index))
+                                            {
+                                                //アニメーション一時停止
+                                                isPauseAnimation = true;
+
+                                                //フレーム選択
+                                                animatedImage.SelectActiveFrame(dimension, index);
+
+                                                using (Bitmap frameImage = new Bitmap(animatedImage.Width, animatedImage.Height))
+                                                {
+                                                    //フレーム画像取得
+                                                    using (Graphics g = Graphics.FromImage(frameImage))
+                                                    {
+                                                        g.DrawImage(animatedImage, new Point(0, 0));
+                                                    }
+
+                                                    //回転処理
+                                                    frameImage.RotateFlip((RotateFlipType)animeRotateType);
+
+                                                    //コピー
+                                                    Clipboard.SetImage(frameImage);
+                                                }
+
+                                                //アニメーション再開
+                                                isPauseAnimation = false;
+                                            }
+                                        };
+                                        contextMenuStrip.Items.Add(toolStripMenuItem);
+                                    }
+                                    //メニュー表示
+                                    contextMenuStrip.Show(Cursor.Position);
+                                }
+                            }
                         }
-                        else if (animatedImage != null)
+                        else
                         {
-                            Clipboard.SetImage(animatedImage);
+                            if (pictureBox.Image != null)
+                            {
+                                Clipboard.SetImage(pictureBox.Image);
+                            }
                         }
                         break;
                 }
@@ -704,10 +762,10 @@ namespace picview
                         //透過色が有効な画像フォーマットの場合で透過色がある場合
                         if (ext == ".gif" || ext == ".png")
                         {
-                            Color trans = ImageUtil.GetTransparentColor(newImage);
+                            Color transColor = ImageUtil.GetTransparentColor(newImage);
 
                             //背景を透明にする
-                            if (trans != Color.Empty)
+                            if (transColor != Color.Empty)
                             {
                                 pictureBox.BackColor = panel.BackColor = TransparencyKey = Color.DarkGoldenrod;
                             }
