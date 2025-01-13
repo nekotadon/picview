@@ -24,7 +24,6 @@ namespace picview
         //画像サイズ
         private Size FileImageSize = new Size(100, 100);//ファイルの本当のサイズ
         //アニメーションgifかどうか
-        private bool animegif = false;
         //表示拡大
         private int zoomIndex;//現在の配列番号
         private int[] zoomRatioArray = { };//拡大率の配列
@@ -35,6 +34,17 @@ namespace picview
         private bool isTitlebarExist => FormBorderStyle != FormBorderStyle.None;
         //初期状態では常に100%表示
         private bool force100per = false;
+        //画像が存在するか
+        bool isImageExist => pictureBox.Image != null || animatedImage != null;
+        //アニメーションgif用
+        Image animatedImage = null;//アニメーションする画像
+        int animeRotateType = 0;//回転処理内容
+        bool isAnimationProcessing = false;//作動中か
+        bool isPauseAnimation = false;//一時停止中か
+        bool atMaunal = false;//意図的なサイズ変更か
+        bool firstImage = true;
+        EventHandler animationHandler = null;
+        int animationPausecounter = 0;
 
         public picview()
         {
@@ -85,8 +95,53 @@ namespace picview
             pictureBox.MouseMove += (sender, e) => pictureBox_MouseMove(sender, e);
             pictureBox.MouseUp += (sender, e) => pictureBox_MouseUp(sender, e);
             pictureBox.MouseWheel += (sender, e) => pictureBox_MouseWheel(sender, e);
+            pictureBox.Paint += OnPaintforAnimation;
             typeof(PictureBox).GetProperty("DoubleBuffered", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).SetValue(pictureBox, true, null);
             panel.Controls.Add(pictureBox);
+
+            //gifアニメーション用
+            animationHandler = (sender, e) => { pictureBox.Invalidate(); };//フレーム変更時の再描画用
+
+            //サイズ変更時gifアニメーションを一時停止
+            System.Timers.Timer timer = new System.Timers.Timer();
+            timer.AutoReset = true;
+            timer.Interval = 100;
+            timer.Enabled = false;
+            timer.Elapsed += (sender, e) =>
+            {
+                //カウントアップ
+                animationPausecounter++;
+
+                //カウントアップ完了（所定時間経過）にて
+                if (animationPausecounter > 5)
+                {
+                    //タイマー終了
+                    timer.Enabled = false;
+
+                    //アニメーション一時停止解除
+                    isPauseAnimation = false;
+                }
+            };
+            SizeChanged += (sender, e) =>
+            {
+                //起動時は遅延しない
+                if (firstImage) return;
+
+                //回転等のマニュアル操作時
+                if (atMaunal)
+                {
+                    atMaunal = false;
+                    return;
+                }
+                //初期化して
+                animationPausecounter = 0;
+
+                //タイマー開始
+                timer.Enabled = true;
+
+                //アニメーション一時停止
+                isPauseAnimation = true;
+            };
 
             //拡大率の配列の作成
             string ratioString = "10,20,30,40,50,60,70,80,90,100,120,150,200,300,400,500,1000";
@@ -267,22 +322,22 @@ namespace picview
                 contextMenuStrip.Items.Add(new ToolStripSeparator());
 
                 //コピー
-                toolStripMenuItem = new ToolStripMenuItem { Text = "コピー C", Enabled = pictureBox.Image != null };
+                toolStripMenuItem = new ToolStripMenuItem { Text = "コピー C", Enabled = isImageExist };
                 toolStripMenuItem.Click += (sender1, e1) => ImageAction(Keys.C);
                 contextMenuStrip.Items.Add(toolStripMenuItem);
 
                 //回転
-                toolStripMenuItem = new ToolStripMenuItem { Text = "右に回転 R", Enabled = pictureBox.Image != null };
+                toolStripMenuItem = new ToolStripMenuItem { Text = "右に回転 R", Enabled = isImageExist };
                 toolStripMenuItem.Click += (sender1, e1) => ImageAction(Keys.R);
                 contextMenuStrip.Items.Add(toolStripMenuItem);
 
                 //左右反転
-                toolStripMenuItem = new ToolStripMenuItem { Text = "左右反転 L", Enabled = pictureBox.Image != null };
+                toolStripMenuItem = new ToolStripMenuItem { Text = "左右反転 L", Enabled = isImageExist };
                 toolStripMenuItem.Click += (sender1, e1) => ImageAction(Keys.L);
                 contextMenuStrip.Items.Add(toolStripMenuItem);
 
                 //上下反転
-                toolStripMenuItem = new ToolStripMenuItem { Text = "上下反転 U", Enabled = pictureBox.Image != null };
+                toolStripMenuItem = new ToolStripMenuItem { Text = "上下反転 U", Enabled = isImageExist };
                 toolStripMenuItem.Click += (sender1, e1) => ImageAction(Keys.U);
                 contextMenuStrip.Items.Add(toolStripMenuItem);
 
@@ -327,7 +382,7 @@ namespace picview
                     bool zoom = e.Delta > 0;//奥に回した場合拡大
 
                     //画像表示がある場合
-                    if (pictureBox.Image != null)
+                    if (isImageExist)
                     {
                         //拡大縮小率変更
                         int zoomIndexCurrent = zoomIndex;//現在の拡大率配列インデックス
@@ -384,7 +439,7 @@ namespace picview
                             if (panel.HorizontalScroll.Visible || panel.VerticalScroll.Visible)//スクロールバーが表示されている場合
                             {
                                 //変更前からの拡大率（1超過なら拡大、1未満なら縮小）。例えば150→200であれば200/150=1.33倍
-                                double ratio = zoomRatioArray[zoomIndex] / (double)zoomRatioArray[zoomIndexCurrent];
+                                double ratio = (double)zoomRatioArray[zoomIndex] / (double)zoomRatioArray[zoomIndexCurrent];
 
                                 //クライアント領域が変更されている可能性があるので再度取得
                                 pointMouse = panel.PointToClient(Cursor.Position);
@@ -492,7 +547,7 @@ namespace picview
                 Application.Exit();
             }
 
-            if (pictureBox.Image != null)
+            if (isImageExist)
             {
                 switch (key)
                 {
@@ -501,10 +556,18 @@ namespace picview
                         Rectangle clientRectangle = RectangleToScreen(ClientRectangle);
 
                         //変更前のスクリーン座標でのクライアント領域の中心
-                        Point clientAreaCenter = new Point(clientRectangle.X + clientRectangle.Width / 2, clientRectangle.Y + clientRectangle.Height / 2);
+                        Point clientAreaCenter = new Point((int)(clientRectangle.X + (double)clientRectangle.Width / 2.0), (int)(clientRectangle.Y + (double)clientRectangle.Height / 2.0));
 
                         //回転
-                        pictureBox.Image.RotateFlip(RotateFlipType.Rotate90FlipNone);
+                        if (isAnimationProcessing)
+                        {
+                            animeRotateType = ImageUtil.GetNextRotateFlipType(animeRotateType, ImageUtil.RotateAction.Rotate90);
+                            atMaunal = true;
+                        }
+                        else
+                        {
+                            pictureBox.Image.RotateFlip(RotateFlipType.Rotate90FlipNone);
+                        }
 
                         //画面内に収まるようにクライアントサイズとpictureBoxサイズ調整。スクリーンに収まりきらない場合はtrueを返す
                         AutoAdjustSize(AjastType.Rotate);
@@ -520,15 +583,38 @@ namespace picview
 
                         break;
                     case Keys.L://左右反転
-                        pictureBox.Image.RotateFlip(RotateFlipType.RotateNoneFlipX);
-                        pictureBox.Refresh();
+                        if (isAnimationProcessing)
+                        {
+                            animeRotateType = ImageUtil.GetNextRotateFlipType(animeRotateType, ImageUtil.RotateAction.FlipHorizontal);
+                            atMaunal = true;
+                        }
+                        else
+                        {
+                            pictureBox.Image.RotateFlip(RotateFlipType.RotateNoneFlipX);
+                            pictureBox.Refresh();
+                        }
                         break;
                     case Keys.U://上下反転
-                        pictureBox.Image.RotateFlip(RotateFlipType.RotateNoneFlipY);
-                        pictureBox.Refresh();
+                        if (isAnimationProcessing)
+                        {
+                            animeRotateType = ImageUtil.GetNextRotateFlipType(animeRotateType, ImageUtil.RotateAction.FlipVertical);
+                            atMaunal = true;
+                        }
+                        else
+                        {
+                            pictureBox.Image.RotateFlip(RotateFlipType.RotateNoneFlipY);
+                            pictureBox.Refresh();
+                        }
                         break;
                     case Keys.C://コピー
-                        Clipboard.SetImage(pictureBox.Image);
+                        if (pictureBox.Image != null)
+                        {
+                            Clipboard.SetImage(pictureBox.Image);
+                        }
+                        else if (animatedImage != null)
+                        {
+                            Clipboard.SetImage(animatedImage);
+                        }
                         break;
                 }
             }
@@ -549,11 +635,12 @@ namespace picview
                     Invoke(new Action(() =>
                     {
                         //ファイル変更処理開始
-                        animegif = false;
+                        AnimationEnd();
                         ChangeFileAction(file, ajust);
                         ChangeTitle();
                         Cursor = Cursors.Default;
                         duringImageChange = false;
+                        firstImage = false;
                     }));
                 });
             }
@@ -562,14 +649,14 @@ namespace picview
         private void ChangeTitle()
         {
             Text = Path.GetFileName(filepath);
-            if (pictureBox.Image != null)
+            if (isImageExist)
             {
                 //画像サイズ
                 Text += " (横" + FileImageSize.Width.ToString() + " x 縦" + FileImageSize.Height.ToString() + ")";
 
                 //拡大率
-                double rateX = (double)pictureBox.Width / FileImageSize.Width;
-                double rateY = (double)pictureBox.Height / FileImageSize.Height;
+                double rateX = (double)pictureBox.Width / (double)FileImageSize.Width;
+                double rateY = (double)pictureBox.Height / (double)FileImageSize.Height;
                 double scale = Math.Min(rateX, rateY) * 100.0;
                 Text += " " + ((int)Math.Round(scale)).ToString() + "%";
             }
@@ -607,12 +694,6 @@ namespace picview
                     //読み込みができた場合
                     if (newImage != null)
                     {
-                        //画像が設定されている場合は一度削除
-                        if (pictureBox.Image != null)
-                        {
-                            pictureBox.Image.Dispose();
-                        }
-
                         //画像ファイルパス更新
                         filepath = file;
 
@@ -624,6 +705,7 @@ namespace picview
                         if (ext == ".gif" || ext == ".png")
                         {
                             Color trans = ImageUtil.GetTransparentColor(newImage);
+
                             //背景を透明にする
                             if (trans != Color.Empty)
                             {
@@ -635,10 +717,30 @@ namespace picview
                         FileImageSize = new Size(newImage.Width, newImage.Height);
 
                         //アニメーションgifかどうか
-                        animegif = ext == ".gif" && newImage.RawFormat.Equals(ImageFormat.Gif) && ImageAnimator.CanAnimate(newImage);
+                        bool animegif = ext == ".gif" && newImage.RawFormat.Equals(ImageFormat.Gif) && ImageAnimator.CanAnimate(newImage);
 
-                        //画像を更新
-                        pictureBox.Image = newImage;
+                        //画像削除
+                        if (pictureBox.Image != null)
+                        {
+                            pictureBox.Image.Dispose();
+                            pictureBox.Image = null;
+                        }
+                        if (animatedImage != null)
+                        {
+                            animatedImage.Dispose();
+                            animatedImage = null;
+                        }
+
+                        //画像更新
+                        if (animegif)
+                        {
+                            animatedImage = newImage;
+                            AnimationStart();
+                        }
+                        else
+                        {
+                            pictureBox.Image = newImage;
+                        }
 
                         //jpgの場合はExif情報に基づいて回転
                         if (ext == ".jpg" || ext == ".jpeg")
@@ -672,7 +774,7 @@ namespace picview
         }
         private bool AutoAdjustSize(AjastType type)
         {
-            if (pictureBox.Image == null) return false;
+            if (!isImageExist) return false;
 
             //回転指示の場合はまずベースサイズを回転
             if (type == AjastType.Rotate)
@@ -715,12 +817,12 @@ namespace picview
                 isFixed = true;
 
                 double w, h, wbase, hbase;
-                if (imageWidth / imageHeight > workareaWidth / workareaHeight)//横長（高さが高いほど、つまり縦長ほど値が小さくなる。値が大きいということは横長）
+                if ((double)imageWidth / (double)imageHeight > (double)workareaWidth / (double)workareaHeight)//横長（高さが高いほど、つまり縦長ほど値が小さくなる。値が大きいということは横長）
                 {
                     w = workareaWidth;//幅は作業領域幅と同じまでとする
                     if (type == AjastType.FileChange)
                     {
-                        hbase = h = Math.Floor(imageHeight * workareaWidth / imageWidth);//高さは比率で計算
+                        hbase = h = Math.Floor((double)imageHeight * (double)workareaWidth / (double)imageWidth);//高さは比率で計算
                         if (force100per)
                         {
                             h = imageHeight <= workareaHeight ? imageHeight : workareaHeight;
@@ -741,7 +843,7 @@ namespace picview
                     h = workareaHeight;//高さは作業領域高さと同じまでとする
                     if (type == AjastType.FileChange)
                     {
-                        wbase = w = Math.Floor(imageWidth * workareaHeight / imageHeight);//幅は比率で計算
+                        wbase = w = Math.Floor((double)imageWidth * (double)workareaHeight / (double)imageHeight);//幅は比率で計算
                         if (force100per)
                         {
                             w = imageWidth <= workareaWidth ? imageWidth : workareaWidth;
@@ -810,7 +912,7 @@ namespace picview
             /////////////
 
             //指示された点が中心になるようにする
-            double left = centerPoint.X - size.Width / 2.0 - border.Left - border.GapLeft;
+            double left = centerPoint.X - (double)size.Width / 2.0 - border.Left - border.GapLeft;
 
             //作業領域の一番左の点（最左端）を取得
             double leftEnd = workarea.Left;
@@ -852,7 +954,7 @@ namespace picview
             /////////////
 
             //処理は左端調整と同じ
-            double top = centerPoint.Y - size.Height / 2.0 - border.Top - border.GapTop;
+            double top = centerPoint.Y - (double)size.Height / 2.0 - border.Top - border.GapTop;
 
             //作業領域の一番左の点（最左端）を取得し必要に応じて修正
             double topEnd = workarea.Top;
@@ -884,6 +986,102 @@ namespace picview
                     zoomIndex = i;
                     break;
                 }
+            }
+        }
+
+        //gifアニメーション開始
+        private void AnimationStart()
+        {
+            //アニメーション画像があり、現在アニメーション実施中でなければ
+            if (animatedImage != null && !isAnimationProcessing)
+            {
+                //アニメーション開始
+                ImageAnimator.Animate(animatedImage, animationHandler);
+
+                //アニメーション作動中
+                isAnimationProcessing = true;
+
+                //再描画
+                pictureBox.Invalidate();
+            }
+        }
+
+        //gifアニメーション終了
+        private void AnimationEnd()
+        {
+            //アニメーション実施中の場合
+            if (isAnimationProcessing)
+            {
+                //アニメーション開始
+                ImageAnimator.StopAnimate(animatedImage, animationHandler);
+
+                //初期化
+                isAnimationProcessing = false;
+                isPauseAnimation = false;
+                animeRotateType = 0;
+
+                //画像破棄
+                if (animatedImage != null)
+                {
+                    animatedImage.Dispose();
+                }
+
+                //再描画
+                pictureBox.Invalidate();
+            }
+        }
+
+        //gifアニメーション描画用
+        private void OnPaintforAnimation(object sender, PaintEventArgs e)
+        {
+            //アニメーション作動中でなければ処理しない
+            if (!isAnimationProcessing) return;
+
+            //画像がない場合（念のため）
+            if (animatedImage == null)
+            {
+                AnimationEnd();
+                return;
+            }
+
+            //一時停止中でなければ
+            if (!isPauseAnimation)
+            {
+                //次のフレームへ
+                ImageAnimator.UpdateFrames();
+            }
+
+            //描画実施
+            using (Bitmap frameImage = new Bitmap(animatedImage.Width, animatedImage.Height))//フレーム画像
+            {
+                using (Graphics g = Graphics.FromImage(frameImage))
+                {
+                    //フレーム画像取得
+                    g.DrawImage(animatedImage, new Point(0, 0));
+                }
+
+                //回転処理
+                frameImage.RotateFlip((RotateFlipType)animeRotateType);
+
+                //描画位置の設定
+                double x, y, w, h;
+                if ((double)frameImage.Width / (double)frameImage.Height > (double)pictureBox.Width / (double)pictureBox.Height)//横長（高さが高いほど、つまり縦長ほど値が小さくなる。値が大きいということは横長）
+                {
+                    w = pictureBox.Width;
+                    h = w / (double)frameImage.Width * (double)frameImage.Height;
+                    x = 0;
+                    y = (double)pictureBox.Height / 2.0 - h / 2.0;
+                }
+                else//縦長
+                {
+                    h = pictureBox.Height;
+                    w = h / (double)frameImage.Height * (double)frameImage.Width;
+                    x = (double)pictureBox.Width / 2.0 - w / 2.0;
+                    y = 0;
+                }
+
+                //PictureBoxに描画
+                e.Graphics.DrawImage(frameImage, (float)x, (float)y, (float)w, (float)h);
             }
         }
 
