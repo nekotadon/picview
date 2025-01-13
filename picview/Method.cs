@@ -15,6 +15,7 @@ namespace picview
         public static Color GetTransparentColor(Image image, string filepath = "")
         {
             // 画像がGIFの場合
+            /*
             if (image.RawFormat.Equals(ImageFormat.Gif))
             {
                 // GIFの場合、カラーパレットを確認
@@ -31,8 +32,187 @@ namespace picview
                         }
                     }
                 }
+            }*/
+            //Graphic Control Extensionから取得
+            if (image.RawFormat.Equals(ImageFormat.Gif) && filepath != "")
+            {
+                if (File.Exists(filepath))
+                {
+                    using (FileStream fs = new FileStream(filepath, FileMode.Open, FileAccess.Read))
+                    {
+                        BinaryReader reader = new BinaryReader(fs);
+
+                        // GIFファイルのシグネチャを確認
+                        byte[] signature = reader.ReadBytes(6);
+                        if (BitConverter.ToString(signature) == "47-49-46-38-39-61")//GIF89a
+                        {
+                            byte[] buffer = { };
+
+                            //読み取り
+                            Func<int, bool> ReadCheck = bytesnum =>
+                            {
+                                buffer = reader.ReadBytes(bytesnum);
+                                return buffer.Length == bytesnum;
+                            };
+
+                            //残りのヘッダー読み込み
+                            if (!ReadCheck(7))
+                            {
+                                return Color.Empty;
+                            }
+
+                            //パレット個数
+                            int size = 1;
+                            for (int i = 0; i <= (buffer[4] & 0b111); i++)
+                            {
+                                size *= 2;
+                            }
+
+                            //共通パレット
+                            byte[] palettes = reader.ReadBytes(size * 3);
+                            if (palettes.Length != size * 3)
+                            {
+                                return Color.Empty;
+                            }
+
+                            while (fs.Position < fs.Length)
+                            {
+                                if (fs.Position == fs.Length - 1)
+                                {
+                                    buffer = reader.ReadBytes(1);
+                                    if (buffer[0] == 0x3b)
+                                    {
+                                        break;
+                                    }
+                                }
+
+                                buffer = reader.ReadBytes(2);
+                                if (BitConverter.ToString(buffer) == "21-F9")//Graphic Control Extension
+                                {
+                                    if (!ReadCheck(6))
+                                    {
+                                        return Color.Empty;
+                                    }
+                                    if ((buffer[1] & 0x01) == 0)
+                                    {
+                                        return Color.Empty;
+                                    }
+
+                                    int index = buffer[4];
+
+                                    if (index < size)
+                                    {
+                                        int r = palettes[index * 3 + 0];
+                                        int g = palettes[index * 3 + 1];
+                                        int b = palettes[index * 3 + 2];
+                                        return Color.FromArgb(255, r, g, b);//RGBの透過色
+                                    }
+                                }
+                                else if (BitConverter.ToString(buffer).StartsWith("2C"))//Image Block
+                                {
+                                    //Image Block Header
+                                    if (!ReadCheck(8))
+                                    {
+                                        return Color.Empty;
+                                    }
+                                    if ((buffer[7] & 0b10000000) != 0)
+                                    {
+                                        int lsize = 1;
+                                        for (int i = 0; i <= (buffer[7] & 0b111); i++)
+                                        {
+                                            lsize *= 2;
+                                        }
+                                        fs.Seek(lsize * 3 + 1, SeekOrigin.Current);
+                                    }
+                                    else
+                                    {
+                                        fs.Seek(1, SeekOrigin.Current);
+                                    }
+
+                                    //Image Block Data
+                                    for (; fs.Position < fs.Length;)
+                                    {
+                                        if (!ReadCheck(1))
+                                        {
+                                            return Color.Empty;
+                                        }
+                                        if (buffer[0] == 0)
+                                        {
+                                            break;
+                                        }
+                                        else
+                                        {
+                                            fs.Seek(buffer[0], SeekOrigin.Current);
+                                        }
+                                    }
+                                }
+                                else if (BitConverter.ToString(buffer) == "21-FE")//Comment Extension
+                                {
+                                    if (!ReadCheck(1))
+                                    {
+                                        return Color.Empty;
+                                    }
+                                    fs.Seek(buffer[0] + 1, SeekOrigin.Current);
+                                }
+                                else if (BitConverter.ToString(buffer) == "21-01")//Plain Text Extension
+                                {
+                                    if (!ReadCheck(13))
+                                    {
+                                        return Color.Empty;
+                                    }
+
+                                    //Data
+                                    for (; fs.Position < fs.Length;)
+                                    {
+                                        if (!ReadCheck(1))
+                                        {
+                                            return Color.Empty;
+                                        }
+                                        if (buffer[0] == 0)
+                                        {
+                                            break;
+                                        }
+                                        else
+                                        {
+                                            fs.Seek(buffer[0], SeekOrigin.Current);
+                                        }
+                                    }
+                                }
+                                else if (BitConverter.ToString(buffer) == "21-FF")//Application Extension
+                                {
+                                    if (!ReadCheck(12))
+                                    {
+                                        return Color.Empty;
+                                    }
+
+                                    //Data
+                                    for (; fs.Position < fs.Length;)
+                                    {
+                                        if (!ReadCheck(1))
+                                        {
+                                            return Color.Empty;
+                                        }
+                                        if (buffer[0] == 0)
+                                        {
+                                            break;
+                                        }
+                                        else
+                                        {
+                                            fs.Seek(buffer[0], SeekOrigin.Current);
+                                        }
+                                    }
+                                }
+                                else
+                                {
+                                    return Color.Empty;
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
+            //PNGの場合
             //IHDRチャンクとtRNSチャンクから確認
             if (image.RawFormat.Equals(ImageFormat.Png) && filepath != "")
             {
@@ -77,7 +257,7 @@ namespace picview
                                         if (buffer.Length >= 2)
                                         {
                                             int gray = BitConverter.ToUInt16(buffer.Take(2).Reverse().ToArray(), 0);
-                                            return Color.FromArgb(0, gray, gray, gray);//グレースケールの透過色
+                                            return Color.FromArgb(255, gray, gray, gray);//グレースケールの透過色
                                         }
                                     }
                                     else if (colorType == 2)//フルカラー
@@ -87,7 +267,7 @@ namespace picview
                                             int r = BitConverter.ToUInt16(buffer.Take(2).Reverse().ToArray(), 0);
                                             int g = BitConverter.ToUInt16(buffer.Skip(2).Take(2).Reverse().ToArray(), 0);
                                             int b = BitConverter.ToUInt16(buffer.Skip(4).Take(2).Reverse().ToArray(), 0);
-                                            return Color.FromArgb(0, r, g, b);//RGBの透過色
+                                            return Color.FromArgb(255, r, g, b);//RGBの透過色
                                         }
                                     }
                                     break;
@@ -98,59 +278,6 @@ namespace picview
                                     fs.Seek(chunkLength + 4, SeekOrigin.Current);//データ長+CRC4バイト分移動
                                 }
                             }
-                        }
-                    }
-                }
-            }
-
-            //上記で判定できない場合
-            // ピクセルフォーマットを確認
-            if (image.PixelFormat == PixelFormat.Format16bppArgb1555 ||
-                image.PixelFormat == PixelFormat.Format32bppArgb)
-            {
-                if (image.Height <= 20 || image.Width <= 20)
-                {
-                    // 画像の各ピクセルを調べて透過色を探す
-                    for (int y = 0; y < image.Height; y++)
-                    {
-                        for (int x = 0; x < image.Width; x++)
-                        {
-                            Color pixelColor = ((Bitmap)image).GetPixel(x, y);
-                            // アルファ値が0のピクセルを見つけた場合
-                            if (pixelColor.A == 0)
-                            {
-                                Color color = pixelColor;
-                                return Color.FromArgb(255, color.R, color.G, color.B); // 透過色を返す
-                            }
-                        }
-                    }
-                }
-                else
-                {
-                    //4隅だけ確認
-                    bool y1st, x1st;
-                    y1st = x1st = true;
-                    for (int y = 0; y < image.Height; y++)
-                    {
-                        for (int x = 0; x < image.Width; x++)
-                        {
-                            Color pixelColor = ((Bitmap)image).GetPixel(x, y);
-                            // アルファ値が0のピクセルを見つけた場合
-                            if (pixelColor.A == 0)
-                            {
-                                Color color = pixelColor;
-                                return Color.FromArgb(255, color.R, color.G, color.B); // 透過色を返す
-                            }
-                            if (x == 10 && x1st)
-                            {
-                                x1st = false;
-                                x = image.Width - 10;
-                            }
-                        }
-                        if (y == 10 && y1st)
-                        {
-                            y1st = false;
-                            y = image.Height - 10;
                         }
                     }
                 }

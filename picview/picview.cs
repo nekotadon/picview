@@ -322,22 +322,22 @@ namespace picview
                 */
 
                 //コピー
-                toolStripMenuItem = new ToolStripMenuItem { Text = "コピー C", Enabled = isImageExist };
+                toolStripMenuItem = new ToolStripMenuItem { Text = "コピー(&C)", Enabled = isImageExist };
                 toolStripMenuItem.Click += (sender1, e1) => ImageAction(Keys.C);
                 contextMenuStrip.Items.Add(toolStripMenuItem);
 
                 //回転
-                toolStripMenuItem = new ToolStripMenuItem { Text = "右に回転 R", Enabled = isImageExist };
+                toolStripMenuItem = new ToolStripMenuItem { Text = "右に回転(&R)", Enabled = isImageExist };
                 toolStripMenuItem.Click += (sender1, e1) => ImageAction(Keys.R);
                 contextMenuStrip.Items.Add(toolStripMenuItem);
 
                 //左右反転
-                toolStripMenuItem = new ToolStripMenuItem { Text = "左右反転 L", Enabled = isImageExist };
+                toolStripMenuItem = new ToolStripMenuItem { Text = "左右反転(&L)", Enabled = isImageExist };
                 toolStripMenuItem.Click += (sender1, e1) => ImageAction(Keys.L);
                 contextMenuStrip.Items.Add(toolStripMenuItem);
 
                 //上下反転
-                toolStripMenuItem = new ToolStripMenuItem { Text = "上下反転 U", Enabled = isImageExist };
+                toolStripMenuItem = new ToolStripMenuItem { Text = "上下反転(&U)", Enabled = isImageExist };
                 toolStripMenuItem.Click += (sender1, e1) => ImageAction(Keys.U);
                 contextMenuStrip.Items.Add(toolStripMenuItem);
 
@@ -374,12 +374,8 @@ namespace picview
                     toolStripMenuItem.DropDownItems.Add(toolStripMenuItem_sub);
 
                     //常に100%表示
-                    toolStripMenuItem_sub = new ToolStripMenuItem { Text = "ファイル初期表示時の倍率は100%とする", Checked = force100per };
-                    toolStripMenuItem_sub.Click += (sender1, e1) =>
-                    {
-                        force100per = !force100per;
-                        iniFile.SetKeyValueBool("setting", "force100per", force100per);
-                    };
+                    toolStripMenuItem_sub = new ToolStripMenuItem { Text = "ファイル初期表示時の倍率は100%とする(&1)", Checked = force100per };
+                    toolStripMenuItem_sub.Click += (sender1, e1) => ImageAction(Keys.NumPad1);
                     toolStripMenuItem.DropDownItems.Add(toolStripMenuItem_sub);
 
                     //起動時にマウスを画面中央に移動する
@@ -771,6 +767,15 @@ namespace picview
                             }
                         }
                         break;
+                    case Keys.NumPad1:
+                    case Keys.D1:
+                        force100per = !force100per;
+                        iniFile.SetKeyValueBool("setting", "force100per", force100per);
+                        if (File.Exists(filepath))
+                        {
+                            ChangeFile(filepath);
+                        }
+                        break;
                 }
             }
         }
@@ -902,7 +907,7 @@ namespace picview
                             //背景を透明にする
                             if (transColor != Color.Empty)
                             {
-                                pictureBox.BackColor = panel.BackColor = TransparencyKey = Color.DarkGoldenrod;
+                                pictureBox.BackColor = panel.BackColor = TransparencyKey = (transColor.R != transColor.B) ? transColor : Color.DarkGoldenrod;
                             }
                         }
 
