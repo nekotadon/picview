@@ -38,7 +38,6 @@
             this.Name = "picview";
             this.Text = "picview";
             this.ResumeLayout(false);
-
         }
 
         #endregion

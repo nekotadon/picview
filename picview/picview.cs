@@ -26,8 +26,14 @@ namespace picview
         //表示拡大率
         private int zoomIndex;//現在の配列番号
         private int[] zoomRatioArray = { 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 120, 150, 200, 300, 400, 500, 1000 };//拡大率の配列0.1倍～10倍まで。メンバに100が存在しないと正常な挙動にならない。
-
+        //ウィンドウ領域、ウィンドウ可視領域、クライアント領域それぞれの上下左右の差分
         private WindowSizeMethod.BorderWidth border = new WindowSizeMethod.BorderWidth();
+        //タイトルバーの有無
+        private bool isTitlebarExist => FormBorderStyle != FormBorderStyle.None;
+
+        [DllImport("user32.dll")]
+        private static extern bool LockWindowUpdate(IntPtr hWndLock);
+
 
         public picview()
         {
@@ -42,7 +48,7 @@ namespace picview
             StartPosition = FormStartPosition.CenterScreen;
             Shown += (sender, e) =>
             {
-                //境界サイズを取得
+                //ウィンドウ領域、ウィンドウ可視領域、クライアント領域それぞれの上下左右の差分を取得
                 border = WindowSizeMethod.GetBorderWidth(this);
 
                 //引数
@@ -195,7 +201,7 @@ namespace picview
             {
                 //コンテキストメニュー作成
                 contextMenuStrip = new ContextMenuStrip();
-
+                /*
                 //透過色に指定してpng保存（サブメニュー）
                 ToolStripMenuItem toolStripMenuItem_PngTrans1 = new ToolStripMenuItem { Text = "別名で保存", Enabled = pictureBox.Image != null };
                 toolStripMenuItem_PngTrans1.Click += (sender1, e1) => SetPngTrans(false);
@@ -210,6 +216,64 @@ namespace picview
                 toolStripMenuItem_PngTrans.DropDownItems.Add(toolStripMenuItem_PngTrans1);
                 toolStripMenuItem_PngTrans.DropDownItems.Add(toolStripMenuItem_PngTrans2);
                 contextMenuStrip.Items.Add(toolStripMenuItem_PngTrans);
+                */
+
+                //タイトルバー
+                ToolStripMenuItem toolStripMenuItem_TitleBar = new ToolStripMenuItem { Text = "タイトルバー", Checked = isTitlebarExist };
+                toolStripMenuItem_TitleBar.Click += (sender1, e1) =>
+                {
+                    //タイトルバーの表示切替
+                    FormBorderStyle = isTitlebarExist ? FormBorderStyle.None : FormBorderStyle.Sizable;
+
+                    //境界再確認
+                    border = WindowSizeMethod.GetBorderWidth(this);
+
+                    /*
+                    if (topDelta != 0 && leftDelta != 0)
+                    {
+                        LockWindowUpdate(this.Handle);
+                        Task.Run(() =>
+                        {
+                            Invoke(new Action(() =>
+                            {
+                                //ウィンドウ位置を変更
+                                Top -= topDelta * (isTitlebarExist ? -1 : 1);
+                                Left -= leftDelta * (isTitlebarExist ? -1 : 1);
+
+                                //タイトルバーの表示切替
+                                FormBorderStyle = isTitlebarExist ? FormBorderStyle.None : FormBorderStyle.Sizable;
+
+                                //境界再確認
+                                border = WindowSizeMethod.GetBorderWidth(this);
+
+                                LockWindowUpdate(IntPtr.Zero);
+                            }));
+                        });
+                    }
+                    else
+                    {
+                        //タイトルバーの表示切替
+                        FormBorderStyle = isTitlebarExist ? FormBorderStyle.None : FormBorderStyle.Sizable;
+
+                        //変更前のウィンドウ領域とクライアント領域の差分を確保
+                        int currentTopGap = border.Top + border.GapTop;
+                        int currentLeftGap = border.Left + border.GapLeft;
+
+                        //境界再確認
+                        border = WindowSizeMethod.GetBorderWidth(this);
+
+                        //変更後のウィンドウ領域とクライアント領域の差分を確保
+                        int nextTopGap = border.Top + border.GapTop;
+                        int nextLeftGap = border.Left + border.GapLeft;
+
+                        //ウィンドウ位置を変更
+                        topDelta = Math.Abs(nextTopGap - currentTopGap);
+                        leftDelta = Math.Abs(nextLeftGap - currentLeftGap);
+                        Top += topDelta * (isTitlebarExist ? -1 : 1);
+                        Left += leftDelta * (isTitlebarExist ? -1 : 1);
+                    }*/
+                };
+                contextMenuStrip.Items.Add(toolStripMenuItem_TitleBar);
 
                 //セパレータ
                 contextMenuStrip.Items.Add(new ToolStripSeparator());
@@ -424,7 +488,7 @@ namespace picview
                         Text = Path.GetFileName(filepath);
                         if (pictureBox.Image != null)
                         {
-                            Text += " (" + pictureBox.Image.Width.ToString() + "x" + pictureBox.Image.Height.ToString() + ")";
+                            Text += " (横" + pictureBox.Image.Width.ToString() + " x 縦" + pictureBox.Image.Height.ToString() + ")";
                         }
                         duringImageChange = false;
                     }));
@@ -660,6 +724,8 @@ namespace picview
             }
         }
 
+        //透過色png作成
+        /*
         private void SetPngTrans(bool add)
         {
             if (pictureBox.Image == null || !File.Exists(filepath))
@@ -699,6 +765,7 @@ namespace picview
                 }
             }
         }
+        */
     }
 
     //ファイル名を自然順でソートするためのクラス
