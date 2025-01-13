@@ -17,12 +17,16 @@ namespace picview
         private PictureBox pictureBox = new PictureBox();
         //画像右クリック時のコンテキストメニュー
         private ContextMenuStrip contextMenuStrip = new ContextMenuStrip();
-        //表示する画像ファイルのフルパス
-        private string filepath = "";
         //表示対象の拡張子
         private string[] pictureExt = { ".bmp", ".jpg", ".jpeg", ".png", ".gif" };
-        //画像サイズ
-        private Size FileImageSize = new Size(100, 100);//ファイルの本当のサイズ
+        //表示する画像ファイルのフルパス
+        private string filepath = "";
+        //表示する画像の画像サイズ
+        private Size fileImageSize = new Size(100, 100);//ファイルの本当のサイズ
+        //表示する画像の情報
+        private int indexOfFile = -1;//同じフォルダ内で何番目のファイルか
+        private int countOfFiles = -1;//同じフォルダ内のファイル数
+        private bool isAlreadySearched = false;//フォルダ内のファイル数確認済み
         //表示拡大
         private int zoomIndex;//現在の配列番号
         private int[] zoomRatioArray = { };//拡大率の配列
@@ -31,8 +35,6 @@ namespace picview
         private WindowSizeMethod.BorderWidth border = new WindowSizeMethod.BorderWidth();
         //タイトルバーの有無
         private bool isTitlebarExist => FormBorderStyle != FormBorderStyle.None;
-        //初期状態では常に100%表示
-        private bool force100per = false;
         //画像が存在するか
         bool isImageExist => pictureBox.Image != null || animatedImage != null;
         //アニメーションgif用
@@ -41,20 +43,37 @@ namespace picview
         bool isAnimationProcessing = false;//作動中か
         bool isPauseAnimation = false;//一時停止中か
         bool atMaunal = false;//意図的なサイズ変更か
-        bool firstImage = true;
+        bool isfirstImage = true;
         EventHandler animationHandler = null;
         int animationPausecounter = 0;
+        //設定
+        TextLib.IniFile iniFile = new TextLib.IniFile();
+        private bool mouseCenterMove = false;//起動時にマウスを中央に移動
+        private bool kidouji = true;//初回起動中
+        private bool force100per = false;//初期状態では常に100%表示
 
         public picview()
         {
             InitializeComponent();
 
+            //設定読み込み
+            if (!iniFile.GetKeyValueBool("setting", "window", true, true))
+            {
+                FormBorderStyle = FormBorderStyle.None;
+            }
+
+            if (iniFile.GetKeyValueBool("setting", "TopMost", false, true))
+            {
+                TopMost = true;
+            }
+
+            force100per = iniFile.GetKeyValueBool("setting", "force100per", false, true);
+            mouseCenterMove = iniFile.GetKeyValueBool("setting", "mouseCenterMove", false, true);
+
             //Form
-            //FormBorderStyle = FormBorderStyle.None;
             MaximizeBox = false;
             Height = 200;
             Width = 250;
-            TopMost = true;
             StartPosition = FormStartPosition.CenterScreen;
             Shown += (sender, e) =>
             {
@@ -66,6 +85,10 @@ namespace picview
                 if (arguments.Length == 2)
                 {
                     ChangeFile(arguments[1]);
+                }
+                else
+                {
+                    kidouji = false;
                 }
             };
             SizeChanged += (sender, e) =>
@@ -124,7 +147,7 @@ namespace picview
             SizeChanged += (sender, e) =>
             {
                 //起動時は遅延しない
-                if (firstImage) return;
+                if (isfirstImage) return;
 
                 //回転等のマニュアル操作時
                 if (atMaunal)
@@ -268,7 +291,7 @@ namespace picview
             //マウス右クリック時（UP時）にコンテキストメニュー表示
             if (mouseRightClick)
             {
-                //コンテキストメニュー作成@@@
+                //コンテキストメニュー作成
                 contextMenuStrip = new ContextMenuStrip();
                 ToolStripMenuItem toolStripMenuItem;
                 ToolStripMenuItem toolStripMenuItem_sub;
@@ -317,11 +340,14 @@ namespace picview
                 toolStripMenuItem = new ToolStripMenuItem { Text = "設定" };
                 {
                     //タイトルバー
-                    toolStripMenuItem_sub = new ToolStripMenuItem { Text = "タイトルバーの表示", Checked = isTitlebarExist };
+                    toolStripMenuItem_sub = new ToolStripMenuItem { Text = "ウィンドウ枠の表示", Checked = isTitlebarExist };
                     toolStripMenuItem_sub.Click += (sender1, e1) =>
                     {
                         //タイトルバーの表示切替
                         FormBorderStyle = isTitlebarExist ? FormBorderStyle.None : FormBorderStyle.Sizable;
+
+                        //設定変更
+                        iniFile.SetKeyValueBool("setting", "window", FormBorderStyle != FormBorderStyle.None);
 
                         //境界再確認
                         border = WindowSizeMethod.GetBorderWidth(this);
@@ -333,14 +359,25 @@ namespace picview
                     toolStripMenuItem_sub.Click += (sender1, e1) =>
                     {
                         TopMost = !TopMost;
+                        iniFile.SetKeyValueBool("setting", "TopMost", TopMost);
                     };
                     toolStripMenuItem.DropDownItems.Add(toolStripMenuItem_sub);
 
                     //常に100%表示
-                    toolStripMenuItem_sub = new ToolStripMenuItem { Text = "初期倍率100%固定", Checked = force100per };
+                    toolStripMenuItem_sub = new ToolStripMenuItem { Text = "ファイル初期表示時の倍率は100%とする", Checked = force100per };
                     toolStripMenuItem_sub.Click += (sender1, e1) =>
                     {
                         force100per = !force100per;
+                        iniFile.SetKeyValueBool("setting", "force100per", force100per);
+                    };
+                    toolStripMenuItem.DropDownItems.Add(toolStripMenuItem_sub);
+
+                    //起動時にマウスを画面中央に移動する
+                    toolStripMenuItem_sub = new ToolStripMenuItem { Text = "起動時にマウスを画面中央に移動する", Checked = mouseCenterMove };
+                    toolStripMenuItem_sub.Click += (sender1, e1) =>
+                    {
+                        mouseCenterMove = !mouseCenterMove;
+                        iniFile.SetKeyValueBool("setting", "mouseCenterMove", mouseCenterMove);
                     };
                     toolStripMenuItem.DropDownItems.Add(toolStripMenuItem_sub);
                 }
@@ -367,7 +404,7 @@ namespace picview
             mouseRightClick = false;
 
             //ファイルが一度も読み込まれていなければ何もしない
-            if (firstImage || filepath == "") return;
+            if (isfirstImage || filepath == "") return;
 
             //コンテキストメニューが開いている場合は閉じる
             if (contextMenuStrip?.IsHandleCreated ?? false)
@@ -497,58 +534,28 @@ namespace picview
                 //次へ、前へ
                 bool next = e.Delta < 0;//手前に回した場合次のファイルへ
 
-                //現在の画像ファイルのあるフォルダ
-                string folder = Path.GetDirectoryName(filepath);
+                //同じフォルダのファイル確認
+                (List<string> filelists, int targetfileIndex, bool isTargetfileExist) = FileUtil.GetSameDirFiles(filepath, pictureExt);
 
-                //フォルダの中のすべての画像ファイルを取得
-                HashSet<string> hashfiles = new HashSet<string> { filepath };//今のファイルが削除されている可能性もあるので追加する
-                foreach (string file in Directory.GetFiles(folder, "*"))
+                //何もなければ何もしない
+                if (targetfileIndex < 0) return;
+
+                //表示する画像を変更
+                if (next && targetfileIndex < filelists.Count() - 1)//次へ移動の場合で今が最後のファイルでなければ
                 {
-                    string ext = Path.GetExtension(file).ToLower();
-                    if (pictureExt.Contains(ext))
-                    {
-                        hashfiles.Add(file);
-                    }
+                    isAlreadySearched = true;
+                    indexOfFile = targetfileIndex;
+                    countOfFiles = filelists.Count();
+                    ChangeFile(filelists[targetfileIndex + 1]);
                 }
-
-                //ファイルリスト
-                List<string> files = new List<string>(hashfiles);
-
-                //ファイルを名前順でソート
-                StringSort.Sort(ref files);
-                //MessageBox.Show(string.Join("\r\n", files.ToArray()));
-
-                //表示する画像の更新
-                for (int i = 0; i < files.Count; i++)
+                else if (!next && 0 < targetfileIndex)//前へ移動の場合で今が最初のファイルでなければ
                 {
-                    //現在表示しているファイルが見つかった場合
-                    if (files[i] == filepath)
-                    {
-                        if (next)//次のファイルに移動する場合
-                        {
-                            if (i < files.Count - 1)//今のファイルが最後のファイルでなければ
-                            {
-                                //表示画像変更
-                                ChangeFile(files[i + 1]);
-                                break;
-                            }
-                        }
-                        else//前のファイルに移動する場合
-                        {
-                            if (i > 0)//今のファイルが最初のファイルでなければ
-                            {
-                                //表示画像変更
-                                ChangeFile(files[i - 1]);
-                                break;
-                            }
-                        }
-
-                        //今と同じファイルなら何もしない
-                        break;
-                    }
+                    isAlreadySearched = true;
+                    indexOfFile = targetfileIndex;
+                    countOfFiles = filelists.Count();
+                    ChangeFile(filelists[targetfileIndex - 1]);
                 }
             }
-
         }
 
         //ショートカットキーアクション
@@ -626,7 +633,7 @@ namespace picview
                             {
                                 //フレーム数確認
                                 FrameDimension dimension = new FrameDimension(animatedImage.FrameDimensionsList[0]);
-                                int frameCount = animatedImage.GetFrameCount(dimension);//@@@
+                                int frameCount = animatedImage.GetFrameCount(dimension);
                                 if (frameCount > 0)
                                 {
                                     //コンテキストメニュー作成
@@ -705,7 +712,8 @@ namespace picview
                         ChangeTitle();
                         Cursor = Cursors.Default;
                         duringImageChange = false;
-                        firstImage = false;
+                        isfirstImage = false;
+                        kidouji = false;
                     }));
                 });
             }
@@ -717,14 +725,38 @@ namespace picview
             if (isImageExist)
             {
                 //画像サイズ
-                Text += " (横" + FileImageSize.Width.ToString() + " x 縦" + FileImageSize.Height.ToString() + ")";
+                Text += " (横" + fileImageSize.Width.ToString() + " x 縦" + fileImageSize.Height.ToString() + ")";
+
+                //基準画像サイズ
+                double fileImageWidth = fileImageSize.Width;
+                double fileImageHeight = fileImageSize.Height;
+                if (pictureBox.Image != null)
+                {
+                    fileImageWidth = pictureBox.Image.Width;
+                    fileImageHeight = pictureBox.Image.Height;
+                }
+                else if (isAnimationProcessing && animeRotateType % 2 != 0)//アニメーションで回転しているとき
+                {
+                    fileImageWidth = fileImageSize.Height;
+                    fileImageHeight = fileImageSize.Width;
+                }
 
                 //拡大率
-                double rateX = (double)pictureBox.Width / (double)FileImageSize.Width;
-                double rateY = (double)pictureBox.Height / (double)FileImageSize.Height;
+                double rateX = (double)pictureBox.Width / fileImageWidth;
+                double rateY = (double)pictureBox.Height / fileImageHeight;
                 double scale = Math.Min(rateX, rateY) * 100.0;
                 Text += " " + ((int)Math.Round(scale)).ToString() + "%";
+
+                //何番目のファイルか
+                if (!isAlreadySearched || indexOfFile < 0 || countOfFiles < 0)
+                {
+                    (List<string> filelists, int targetfileIndex, bool isTargetfileExist) = FileUtil.GetSameDirFiles(filepath, pictureExt);
+                    indexOfFile = targetfileIndex;
+                    countOfFiles = filelists.Count();
+                }
+                Text += " [" + (indexOfFile + 1).ToString() + "/" + countOfFiles.ToString() + "]";
             }
+            isAlreadySearched = false;
         }
 
         //表示する画像の変更処理
@@ -771,12 +803,13 @@ namespace picview
                         animatedImage = null;
                     }
 
+                    //透過色を無効にして通常背景色にする
+                    TransparencyKey = Color.Empty;
+                    BackColor = pictureBox.BackColor = panel.BackColor = SystemColors.Control;
+
                     //読み込みができた場合
                     if (newImage != null)
                     {
-                        //透過色を無効にして通常背景色にする
-                        TransparencyKey = Color.Empty;
-                        BackColor = pictureBox.BackColor = panel.BackColor = SystemColors.Control;
 
                         //透過色が有効な画像フォーマットの場合で透過色がある場合
                         if (ext == ".gif" || ext == ".png")
@@ -791,7 +824,7 @@ namespace picview
                         }
 
                         //画像サイズ取得
-                        FileImageSize = new Size(newImage.Width, newImage.Height);
+                        fileImageSize = new Size(newImage.Width, newImage.Height);
 
                         //アニメーションgifかどうか
                         bool animegif = ext == ".gif" && newImage.RawFormat.Equals(ImageFormat.Gif) && ImageAnimator.CanAnimate(newImage);
@@ -813,7 +846,7 @@ namespace picview
                             ushort orientation = ImageUtil.GetExifOrientation(newImage);
                             RotateFlipType type = ImageUtil.GetRotateFlipType(orientation);
                             pictureBox.Image.RotateFlip(type);
-                            FileImageSize = new Size(newImage.Width, newImage.Height);
+                            fileImageSize = new Size(newImage.Width, newImage.Height);
                         }
 
                         //サイズ調整
@@ -821,6 +854,9 @@ namespace picview
                         {
                             //画面内に収まるようにクライアントサイズとpictureBoxサイズ調整。スクリーンに収まりきらない場合はtrueを返す
                             AutoAdjustSize(AjastType.FileChange);
+
+                            //起動時にマウス位置を変える場合
+                            Display.MoveCursorToWorkAreaCenter(this, kidouji && mouseCenterMove);
 
                             //ウィンドウ位置調整
                             AutoAdjustLocation(ClientSize, Cursor.Position);
@@ -852,7 +888,7 @@ namespace picview
             if (type == AjastType.FileChange)//新規ファイル読み込み時
             {
                 //画像サイズそのまま
-                size = FileImageSize;
+                size = fileImageSize;
             }
             else
             {

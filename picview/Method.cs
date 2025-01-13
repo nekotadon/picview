@@ -3,6 +3,7 @@ using System.IO;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
+using System.Linq;
 using System.Windows.Forms;
 using System.Runtime.InteropServices;
 
@@ -199,7 +200,7 @@ namespace picview
     }
 
     //ファイル名を自然順でソートするためのクラス
-    public static class StringSort
+    public static class FileUtil
     {
         //文字列比較用Win32API
         internal static class NativeMethods
@@ -240,9 +241,58 @@ namespace picview
         }
 
         //ソートメソッド
-        public static void Sort(ref List<string> lists)
+        public static void StringSort(ref List<string> lists)
         {
             lists.Sort(StringComparer);
+        }
+
+        //対象ファイルのあるフォルダのファイルリスト、対象ファイルが何番目のファイルか、対象ファイルが存在するか
+        public static (List<string> filelists, int fileIndex, bool isFileExist) GetSameDirFiles(string filepath, string[] targetExt)
+        {
+            //ファイルのあるフォルダが存在しない場合
+            string folder = Path.GetDirectoryName(filepath);
+            if (!Directory.Exists(folder))
+            {
+                return (null, -1, false);
+            }
+
+            //ファイルが存在するか
+            bool isFileExist = File.Exists(filepath);
+
+            //対象拡張子を小文字化
+            string[] exts = targetExt.Select(x => x.ToLower()).ToArray();
+
+            //フォルダの中のすべてのファイルを取得
+            HashSet<string> hashfiles = new HashSet<string> { filepath };//今のファイルが削除されている可能性もあるので追加する
+            foreach (string file in Directory.GetFiles(folder, "*"))
+            {
+                string ext = Path.GetExtension(file).ToLower();
+                if (exts.Contains(ext))
+                {
+                    hashfiles.Add(file);
+                }
+            }
+
+            //ファイルリスト
+            List<string> files = new List<string>(hashfiles);
+
+            //ファイルを名前順でソート
+            StringSort(ref files);
+
+            //対象ファイルが何番目のファイル
+            int index = -1;
+
+            //表示する画像の更新
+            for (int i = 0; i < files.Count; i++)
+            {
+                //現在表示しているファイルが見つかった場合
+                if (files[i].ToLower() == filepath.ToLower())
+                {
+                    index = i;
+                }
+            }
+
+            return (files, index, isFileExist);
         }
     }
 
@@ -348,6 +398,21 @@ namespace picview
             border.GapBottom = (virtualWindowArea.Y + virtualWindowArea.Height - (windowArea?.Y + windowArea?.Height)) ?? 0;
 
             return border;
+        }
+    }
+
+    //ディスプレイ
+    public static class Display
+    {
+        //マウスをスクリーン中央へ移動
+        public static void MoveCursorToWorkAreaCenter(Control control, bool action = true)
+        {
+            if (!action) return;
+
+            Rectangle rectangle = Screen.GetWorkingArea(control);
+            double x = (double)rectangle.X + (double)rectangle.Width / 2.0;
+            double y = (double)rectangle.Y + (double)rectangle.Height / 2.0;
+            Cursor.Position = new Point((int)x, (int)y);
         }
     }
 
