@@ -224,81 +224,37 @@ namespace picview
                 */
 
                 //タイトルバー
-                ToolStripMenuItem toolStripMenuItem_TitleBar = new ToolStripMenuItem { Text = "タイトルバー", Checked = isTitlebarExist };
-                toolStripMenuItem_TitleBar.Click += (sender1, e1) =>
+                toolStripMenuItem = new ToolStripMenuItem { Text = "タイトルバーの表示", Checked = isTitlebarExist };
+                toolStripMenuItem.Click += (sender1, e1) =>
                 {
                     //タイトルバーの表示切替
                     FormBorderStyle = isTitlebarExist ? FormBorderStyle.None : FormBorderStyle.Sizable;
 
                     //境界再確認
                     border = WindowSizeMethod.GetBorderWidth(this);
-                    /*
-                    if (topDelta != 0 && leftDelta != 0)
-                    {
-                        LockWindowUpdate(this.Handle);
-                        Task.Run(() =>
-                        {
-                            Invoke(new Action(() =>
-                            {
-                                //ウィンドウ位置を変更
-                                Top -= topDelta * (isTitlebarExist ? -1 : 1);
-                                Left -= leftDelta * (isTitlebarExist ? -1 : 1);
-
-                                //タイトルバーの表示切替
-                                FormBorderStyle = isTitlebarExist ? FormBorderStyle.None : FormBorderStyle.Sizable;
-
-                                //境界再確認
-                                border = WindowSizeMethod.GetBorderWidth(this);
-
-                                LockWindowUpdate(IntPtr.Zero);
-                            }));
-                        });
-                    }
-                    else
-                    {
-                        //タイトルバーの表示切替
-                        FormBorderStyle = isTitlebarExist ? FormBorderStyle.None : FormBorderStyle.Sizable;
-
-                        //変更前のウィンドウ領域とクライアント領域の差分を確保
-                        int currentTopGap = border.Top + border.GapTop;
-                        int currentLeftGap = border.Left + border.GapLeft;
-
-                        //境界再確認
-                        border = WindowSizeMethod.GetBorderWidth(this);
-
-                        //変更後のウィンドウ領域とクライアント領域の差分を確保
-                        int nextTopGap = border.Top + border.GapTop;
-                        int nextLeftGap = border.Left + border.GapLeft;
-
-                        //ウィンドウ位置を変更
-                        topDelta = Math.Abs(nextTopGap - currentTopGap);
-                        leftDelta = Math.Abs(nextLeftGap - currentLeftGap);
-                        Top += topDelta * (isTitlebarExist ? -1 : 1);
-                        Left += leftDelta * (isTitlebarExist ? -1 : 1);
-                    }*/
                 };
-                contextMenuStrip.Items.Add(toolStripMenuItem_TitleBar);
+                contextMenuStrip.Items.Add(toolStripMenuItem);
 
                 //セパレータ
                 contextMenuStrip.Items.Add(new ToolStripSeparator());
 
                 //コピー
-                toolStripMenuItem = new ToolStripMenuItem { Text = "コピー C" };
+                toolStripMenuItem = new ToolStripMenuItem { Text = "コピー C", Enabled = pictureBox.Image != null };
                 toolStripMenuItem.Click += (sender1, e1) => ImageAction(Keys.C);
                 contextMenuStrip.Items.Add(toolStripMenuItem);
 
                 //回転
-                toolStripMenuItem = new ToolStripMenuItem { Text = "回転 L" };
-                toolStripMenuItem.Click += (sender1, e1) => ImageAction(Keys.L);
-                contextMenuStrip.Items.Add(toolStripMenuItem);
-
-                //左右反転
-                toolStripMenuItem = new ToolStripMenuItem { Text = "左右反転 R" };
+                toolStripMenuItem = new ToolStripMenuItem { Text = "右に回転 R", Enabled = pictureBox.Image != null };
                 toolStripMenuItem.Click += (sender1, e1) => ImageAction(Keys.R);
                 contextMenuStrip.Items.Add(toolStripMenuItem);
 
+                //左右反転
+                toolStripMenuItem = new ToolStripMenuItem { Text = "左右反転 L", Enabled = pictureBox.Image != null };
+                toolStripMenuItem.Click += (sender1, e1) => ImageAction(Keys.L);
+                contextMenuStrip.Items.Add(toolStripMenuItem);
+
                 //上下反転
-                toolStripMenuItem = new ToolStripMenuItem { Text = "上下反転 U" };
+                toolStripMenuItem = new ToolStripMenuItem { Text = "上下反転 U", Enabled = pictureBox.Image != null };
                 toolStripMenuItem.Click += (sender1, e1) => ImageAction(Keys.U);
                 contextMenuStrip.Items.Add(toolStripMenuItem);
 
@@ -306,8 +262,8 @@ namespace picview
                 contextMenuStrip.Items.Add(new ToolStripSeparator());
 
                 //終了
-                toolStripMenuItem = new ToolStripMenuItem { Text = "終了" };
-                toolStripMenuItem.Click += (sender1, e1) => Application.Exit();
+                toolStripMenuItem = new ToolStripMenuItem { Text = "終了 Esc" };
+                toolStripMenuItem.Click += (sender1, e1) => ImageAction(Keys.Escape);
                 contextMenuStrip.Items.Add(toolStripMenuItem);
 
                 //メニュー表示
@@ -411,22 +367,22 @@ namespace picview
                                 double nextPointScrollX = -pointscroll.X + pointMouseAbsX * (ratio - 1);
                                 double nextPointScrollY = -pointscroll.Y + pointMouseAbsY * (ratio - 1);
                                 panel.AutoScrollPosition = new Point((int)nextPointScrollX, (int)nextPointScrollY);
-
                                 /*
-                                                               ↓変更後のpictureBox
+                                               S'
+                                    |<────────────────│    ↓変更後のpictureBox
                                     ┌───────────────────────────────────── 
-                                    │      B'
-                                    ├──────────>│              ↓変更前のpictureBox
+                                    │          S      
+                                    │   |<────────────│    ↓変更前のpictureBox
                                     │   ┌──────────────────────────────┐
-                                    │   │   B   │                      │  B     = - pointscroll.X(変更前)  取得時は負
-                                    │   ├──────>┌─────────────┐        │  B'    = nextPointScrollX(変更後) 設定するときは正
-                               - pointscroll.X  │             │        │  B + C = pointMouseAbsX 
-                                 (always X<0)   │             │        │ 
-                                    │   │       │  C          │        │  B'+ C = (B + C) * ratio 
-                                    │   │       ├────>*       │        │     B' = (B + C) * ratio - C
-                                    │   │       │pointMouse.X │        │     B' = B + C * (ratio - 1)
-                                    │   │       │ Client Area │        │
-                                    │   │       │ (View Area) │        │
+                                    │dB │   B   │     │                │  B      = - pointscroll.X(変更前)  取得時は負
+                                    ├──>├──────>┌─────────────┐        │  B + dB = nextPointScrollX(変更後) 設定するときは正
+                                    │   │       │     │       │        │
+                                    │   │       │     │       │        │  S'     = S * ratio
+                                    │   │       │  C  │       │        │         = (B + C) * ratio
+                                    │   │       ├────>*       │        │         = pointMouseAbsX * ratio
+                                    │   │       │             │        │  dB     = S' - S
+                                    │   │       │ Client Area │        │         = pointMouseAbsX * ratio - pointMouseAbsX
+                                    │   │       │ (View Area) │        │         = pointMouseAbsX * (ratio - 1)
                                     │   │       └─────────────┘        │
                                 */
                             }
@@ -500,14 +456,20 @@ namespace picview
             }
         }
 
-        //画像の回転、左右反転、上下反転、コピー
+        //ショートカットキーアクション
         private void ImageAction(Keys key)
         {
+            //Escで終了
+            if (key == Keys.Escape)
+            {
+                Application.Exit();
+            }
+
             if (pictureBox.Image != null)
             {
                 switch (key)
                 {
-                    case Keys.L://回転
+                    case Keys.R://回転
                         //変更前のスクリーン座標でのクライアント領域
                         Rectangle clientRectangle = RectangleToScreen(ClientRectangle);
 
@@ -533,7 +495,7 @@ namespace picview
                         ChangeTitle();
 
                         break;
-                    case Keys.R://左右反転
+                    case Keys.L://左右反転
                         pictureBox.Image.RotateFlip(RotateFlipType.RotateNoneFlipX);
                         pictureBox.Refresh();
                         break;
