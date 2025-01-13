@@ -25,15 +25,11 @@ namespace picview
         private Size baseSize = new Size(100, 100);
         //表示拡大率
         private int zoomIndex;//現在の配列番号
-        private int[] zoomRatioArray = { 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 120, 150, 200, 300, 400, 500, 1000 };//拡大率の配列0.1倍～10倍まで。メンバに100が存在しないと正常な挙動にならない。
+        private int[] zoomRatioArray = { };//拡大率の配列
         //ウィンドウ領域、ウィンドウ可視領域、クライアント領域それぞれの上下左右の差分
         private WindowSizeMethod.BorderWidth border = new WindowSizeMethod.BorderWidth();
         //タイトルバーの有無
         private bool isTitlebarExist => FormBorderStyle != FormBorderStyle.None;
-
-        [DllImport("user32.dll")]
-        private static extern bool LockWindowUpdate(IntPtr hWndLock);
-
 
         public picview()
         {
@@ -58,6 +54,8 @@ namespace picview
                     ChangeFile(arguments[1]);
                 }
             };
+            KeyPreview = true;
+            KeyDown += (sender, e) => ImageAction(e.KeyData);
 
             //Panel
             panel.Dock = DockStyle.Fill;
@@ -77,6 +75,11 @@ namespace picview
             pictureBox.MouseWheel += (sender, e) => pictureBox_MouseWheel(sender, e);
             typeof(PictureBox).GetProperty("DoubleBuffered", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).SetValue(pictureBox, true, null);
             panel.Controls.Add(pictureBox);
+
+            //拡大率の配列の作成
+            string ratioString = "10,20,30,40,50,60,70,80,90,100,120,150,200,300,400,500,1000";
+            zoomRatioArray = ("100," + ratioString).Split(',').Where(x => int.TryParse(x, out int i)).Select(x => int.Parse(x)).Where(x => x > 0).Distinct().ToArray();
+            Array.Sort(zoomRatioArray);
 
             //拡大率をリセット
             ZoomIndexReset();
@@ -199,8 +202,10 @@ namespace picview
             //マウス右クリック時（UP時）にコンテキストメニュー表示
             if (mouseRightClick)
             {
-                //コンテキストメニュー作成
+                //コンテキストメニュー作成@@@
                 contextMenuStrip = new ContextMenuStrip();
+                ToolStripMenuItem toolStripMenuItem;
+
                 /*
                 //透過色に指定してpng保存（サブメニュー）
                 ToolStripMenuItem toolStripMenuItem_PngTrans1 = new ToolStripMenuItem { Text = "別名で保存", Enabled = pictureBox.Image != null };
@@ -227,7 +232,6 @@ namespace picview
 
                     //境界再確認
                     border = WindowSizeMethod.GetBorderWidth(this);
-
                     /*
                     if (topDelta != 0 && leftDelta != 0)
                     {
@@ -278,10 +282,33 @@ namespace picview
                 //セパレータ
                 contextMenuStrip.Items.Add(new ToolStripSeparator());
 
+                //コピー
+                toolStripMenuItem = new ToolStripMenuItem { Text = "コピー C" };
+                toolStripMenuItem.Click += (sender1, e1) => ImageAction(Keys.C);
+                contextMenuStrip.Items.Add(toolStripMenuItem);
+
+                //回転
+                toolStripMenuItem = new ToolStripMenuItem { Text = "回転 L" };
+                toolStripMenuItem.Click += (sender1, e1) => ImageAction(Keys.L);
+                contextMenuStrip.Items.Add(toolStripMenuItem);
+
+                //左右反転
+                toolStripMenuItem = new ToolStripMenuItem { Text = "左右反転 R" };
+                toolStripMenuItem.Click += (sender1, e1) => ImageAction(Keys.R);
+                contextMenuStrip.Items.Add(toolStripMenuItem);
+
+                //上下反転
+                toolStripMenuItem = new ToolStripMenuItem { Text = "上下反転 U" };
+                toolStripMenuItem.Click += (sender1, e1) => ImageAction(Keys.U);
+                contextMenuStrip.Items.Add(toolStripMenuItem);
+
+                //セパレータ
+                contextMenuStrip.Items.Add(new ToolStripSeparator());
+
                 //終了
-                ToolStripMenuItem toolStripMenuItem_Close = new ToolStripMenuItem { Text = "終了" };
-                toolStripMenuItem_Close.Click += (sender1, e1) => Application.Exit();
-                contextMenuStrip.Items.Add(toolStripMenuItem_Close);
+                toolStripMenuItem = new ToolStripMenuItem { Text = "終了" };
+                toolStripMenuItem.Click += (sender1, e1) => Application.Exit();
+                contextMenuStrip.Items.Add(toolStripMenuItem);
 
                 //メニュー表示
                 contextMenuStrip.Show(Cursor.Position);
@@ -289,6 +316,7 @@ namespace picview
             }
         }
 
+        //ホイール操作で移動または拡大縮小
         private void pictureBox_MouseWheel(object sender, MouseEventArgs e)
         {
             mouseRightClick = false;
@@ -371,7 +399,7 @@ namespace picview
                             bool isFixed = AutoAdjustSize(nextSize, false);
 
                             //ウィンドウ位置調整
-                            AutoAdjustLocation(ClientSize, !isFixed);//縮小されている場合はマウスの位置を中心にしない
+                            AutoAdjustLocation(ClientSize, isFixed ? null : (Point?)Cursor.Position);//縮小されている場合はマウスの位置を中心にしない
 
                             //スクロールバーの位置調整
                             if (panel.HorizontalScroll.Visible || panel.VerticalScroll.Visible)//スクロールバーが表示されている場合
@@ -402,6 +430,9 @@ namespace picview
                                     │   │       └─────────────┘        │
                                 */
                             }
+
+                            //タイトル変更
+                            ChangeTitle();
                         }
                     }
                 }
@@ -459,12 +490,60 @@ namespace picview
                             AutoAdjustSize(pictureBox.Image.Size);
 
                             //ウィンドウ位置調整
-                            AutoAdjustLocation(ClientSize);
+                            AutoAdjustLocation(ClientSize, Cursor.Position);
 
                             baseSize = ClientSize;
                             break;
                         }
                     }
+                }
+            }
+        }
+
+        //画像の回転、左右反転、上下反転、コピー
+        private void ImageAction(Keys key)
+        {
+            if (pictureBox.Image != null)
+            {
+                switch (key)
+                {
+                    case Keys.L://回転
+                        //変更前のスクリーン座標でのクライアント領域
+                        Rectangle clientRectangle = RectangleToScreen(ClientRectangle);
+
+                        //変更前のスクリーン座標でのクライアント領域の中心
+                        Point clientAreaCenter = new Point(clientRectangle.X + clientRectangle.Width / 2, clientRectangle.Y + clientRectangle.Height / 2);
+
+                        //回転
+                        pictureBox.Image.RotateFlip(RotateFlipType.Rotate90FlipNone);
+
+                        //画面内に収まるようにクライアントサイズとpictureBoxサイズ調整。スクリーンに収まりきらない場合はtrueを返す
+                        AutoAdjustSize(pictureBox.Image.Size);
+
+                        //ウィンドウ位置調整
+                        AutoAdjustLocation(ClientSize, clientAreaCenter);
+
+                        //ベースサイズ変更
+                        baseSize = ClientSize;
+
+                        //表示をリフレッシュ
+                        pictureBox.Refresh();
+
+                        //タイトル変更
+                        ChangeTitle();
+
+                        break;
+                    case Keys.R://左右反転
+                        pictureBox.Image.RotateFlip(RotateFlipType.RotateNoneFlipX);
+                        pictureBox.Refresh();
+                        break;
+                    case Keys.U://上下反転
+                        pictureBox.Image.RotateFlip(RotateFlipType.RotateNoneFlipY);
+                        pictureBox.Refresh();
+                        break;
+                    case Keys.C://コピー
+                        Clipboard.SetImage(pictureBox.Image);
+                        break;
                 }
             }
         }
@@ -484,15 +563,32 @@ namespace picview
                     Invoke(new Action(() =>
                     {
                         ChangeFileAction(file, ajust);
+                        ChangeTitle();
                         Cursor = Cursors.Default;
-                        Text = Path.GetFileName(filepath);
-                        if (pictureBox.Image != null)
-                        {
-                            Text += " (横" + pictureBox.Image.Width.ToString() + " x 縦" + pictureBox.Image.Height.ToString() + ")";
-                        }
                         duringImageChange = false;
                     }));
                 });
+            }
+        }
+
+        private void ChangeTitle()
+        {
+            Text = Path.GetFileName(filepath);
+            if (pictureBox.Image != null)
+            {
+                Text += " (横" + pictureBox.Image.Width.ToString() + " x 縦" + pictureBox.Image.Height.ToString() + ")";
+
+                int percent;
+                if (pictureBox.Image.Width / pictureBox.Image.Height > pictureBox.Width / pictureBox.Height)//横長
+                {
+                    percent = (int)((double)pictureBox.Width / (double)pictureBox.Image.Width * 100);
+                }
+                else//縦長
+                {
+                    percent = (int)((double)pictureBox.Height / (double)pictureBox.Image.Height * 100);
+                }
+
+                Text += " " + percent.ToString() + "%";
             }
         }
 
@@ -560,7 +656,7 @@ namespace picview
                             AutoAdjustSize(pictureBox.Image.Size);
 
                             //ウィンドウ位置調整
-                            AutoAdjustLocation(ClientSize);
+                            AutoAdjustLocation(ClientSize, Cursor.Position);
                         }
                     }
 
@@ -633,21 +729,22 @@ namespace picview
         }
 
         //ウィンドウ位置調整
-        //通常（mouseCenter = true）はマウスの中心=ウィンドウの中心となるように位置調整
-        private void AutoAdjustLocation(Size size, bool mouseCenter = true)
+        //通常はマウスの中心=ウィンドウの中心となるように第2引数にCursor.Positionを設定
+        private void AutoAdjustLocation(Size size, Point? centerPoint = null)
         {
             //作業領域（ディスプレイのデスクトップ領域からタスクバーをのぞいた領域）の高さと幅を取得
             Rectangle workarea = Screen.GetWorkingArea(this);
 
-            //マウスの現在位置
-            Point mp = Cursor.Position;
+            //指示の有無
+            bool isUseIndicatedPoint = centerPoint != null;
+            Point indicatedPoint = centerPoint ?? new Point(0, 0);
 
             /////////////
             //左端調整
             /////////////
 
             //通常はマウスの中心=ウィンドウの中心。拡大縮小によって画面内に収まらない場合は一旦変更なし
-            double left = mouseCenter ? (mp.X - size.Width / 2.0) : Left;
+            double left = isUseIndicatedPoint ? (indicatedPoint.X - size.Width / 2.0 - border.Left - border.GapLeft) : Left;
 
             //作業領域の一番左の点（最左端）を取得
             double leftEnd = workarea.Left;
@@ -689,7 +786,7 @@ namespace picview
             /////////////
 
             //処理は左端調整と同じ
-            double top = mouseCenter ? (mp.Y - size.Height / 2.0) : Top;
+            double top = isUseIndicatedPoint ? (indicatedPoint.Y - size.Height / 2.0 - border.Top - border.GapTop) : Top;
 
             //作業領域の一番左の点（最左端）を取得し必要に応じて修正
             double topEnd = workarea.Top;
