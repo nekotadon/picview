@@ -23,11 +23,15 @@ namespace picview
         private string filepath = "";
         //表示する画像の画像サイズ
         private Size fileImageSize = new Size(100, 100);//ファイルの本当のサイズ
+        private Size zoom100perSize = new Size(100, 100);//拡大率100%での画面サイズ
         //表示する画像の情報
         private int indexOfFile = -1;//同じフォルダ内で何番目のファイルか
         private int countOfFiles = -1;//同じフォルダ内のファイル数
         private bool isAlreadySearched = false;//フォルダ内のファイル数確認済み
         //表示拡大
+        private double currentZoomRatio = 1.0;//現在の拡大率
+        private bool isNotCalcScale = false;//拡大率計算一時無効
+        private bool isZoomIndexReset = false;//拡大率リセット
         private int zoomIndex;//現在の配列番号
         private int[] zoomRatioArray = { };//拡大率の配列
         private Size zoomBaseSize = new Size(100, 100);//拡大率100%のサイズ
@@ -95,6 +99,10 @@ namespace picview
             {
                 if (WindowState == FormWindowState.Normal)
                 {
+                    if (isZoomIndexReset)
+                    {
+                        zoomIndex = -1;
+                    }
                     ChangeTitle();
                 }
             };
@@ -344,7 +352,9 @@ namespace picview
                     toolStripMenuItem_sub.Click += (sender1, e1) =>
                     {
                         //タイトルバーの表示切替
+                        isZoomIndexReset = false;
                         FormBorderStyle = isTitlebarExist ? FormBorderStyle.None : FormBorderStyle.Sizable;
+                        isZoomIndexReset = true;
 
                         //設定変更
                         iniFile.SetKeyValueBool("setting", "window", FormBorderStyle != FormBorderStyle.None);
@@ -430,22 +440,69 @@ namespace picview
                 //画像表示がある場合
                 if (isImageExist)
                 {
-                    //拡大縮小率変更
+                    //インデックス有無
                     int zoomIndexCurrent = zoomIndex;//現在の拡大率配列インデックス
-                    zoomIndex += zoom ? 1 : -1;
+                    bool normal = zoomIndexCurrent >= 0;
 
-                    //変更後の拡大率配列インデックス
-                    if (zoomIndex < 0)//最後まで縮小している場合は
+                    //配列インデックス更新
+                    double currentH = 1;
+                    if (!normal)
                     {
-                        zoomIndex = 0;//最小縮小率に設定
+                        currentH = zoom100perSize.Height * currentZoomRatio;
+                        int currentRatio = (int)Math.Round(currentH / zoomBaseSize.Height * 100.0);
+
+                        if (currentRatio <= zoomRatioArray[0])
+                        {
+                            return;
+                        }
+                        else if (currentRatio >= zoomRatioArray[zoomRatioArray.Length - 1])
+                        {
+                            return;
+                        }
+                        else
+                        {
+                            if (zoom)
+                            {
+                                for (int i = 0; i < zoomRatioArray.Length; i++)
+                                {
+                                    if (currentRatio < zoomRatioArray[i])
+                                    {
+                                        zoomIndex = i;
+                                        break;
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                for (int i = zoomRatioArray.Length - 1; i >= 0; i--)
+                                {
+                                    if (zoomRatioArray[i] < currentRatio)
+                                    {
+                                        zoomIndex = i;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
                     }
-                    if (zoomIndex > zoomRatioArray.Length - 1)//最後まで拡大している場合は
+                    else
                     {
-                        zoomIndex = zoomRatioArray.Length - 1;//最大拡大率に設定
+                        //拡大縮小率変更
+                        zoomIndex += zoom ? 1 : -1;
+
+                        //変更後の拡大率配列インデックス
+                        if (zoomIndex < 0)//最後まで縮小している場合は
+                        {
+                            zoomIndex = 0;//最小縮小率に設定
+                        }
+                        if (zoomIndex > zoomRatioArray.Length - 1)//最後まで拡大している場合は
+                        {
+                            zoomIndex = zoomRatioArray.Length - 1;//最大拡大率に設定
+                        }
                     }
 
                     //変更後のサイズ
-                    if (zoomIndex != zoomIndexCurrent)//拡大縮小率が変更された場合
+                    if ((normal && zoomIndex != zoomIndexCurrent) || !normal)//拡大縮小率が変更された場合
                     {
                         //変更前のマウス位置(pictureBox基準)
                         Point pointMouse = panel.PointToClient(Cursor.Position);
@@ -475,8 +532,11 @@ namespace picview
                                 └──────────────────────────────┘
                         */
 
+
                         //画面内に収まるようにクライアントサイズとpictureBoxサイズ調整。スクリーンに収まりきらない場合はtrueを返す
-                        bool isFixed = AutoAdjustSize(AjastType.Zoom);
+                        isZoomIndexReset = false;
+                        AutoAdjustSize(AjastType.Zoom);
+                        isZoomIndexReset = true;
 
                         //ウィンドウ位置調整
                         AutoAdjustLocation(ClientSize, Cursor.Position);
@@ -485,7 +545,16 @@ namespace picview
                         if (panel.HorizontalScroll.Visible || panel.VerticalScroll.Visible)//スクロールバーが表示されている場合
                         {
                             //変更前からの拡大率（1超過なら拡大、1未満なら縮小）。例えば150→200であれば200/150=1.33倍
-                            double ratio = (double)zoomRatioArray[zoomIndex] / (double)zoomRatioArray[zoomIndexCurrent];
+                            double ratio;
+                            if (normal)
+                            {
+                                ratio = (double)zoomRatioArray[zoomIndex] / (double)zoomRatioArray[zoomIndexCurrent];
+                            }
+                            else
+                            {
+                                double nextH = (double)zoomBaseSize.Height * (double)zoomRatioArray[zoomIndex];
+                                ratio = nextH / currentH;
+                            }
 
                             //クライアント領域が変更されている可能性があるので再度取得
                             pointMouse = panel.PointToClient(Cursor.Position);
@@ -523,9 +592,6 @@ namespace picview
                                 │   │       └─────────────┘        │
                             */
                         }
-
-                        //タイトル変更
-                        ChangeTitle();
                     }
                 }
             }
@@ -589,17 +655,19 @@ namespace picview
                             pictureBox.Image.RotateFlip(RotateFlipType.Rotate90FlipNone);
                         }
 
+                        //拡大率再計算不要
+                        isNotCalcScale = true;
+
                         //画面内に収まるようにクライアントサイズとpictureBoxサイズ調整。スクリーンに収まりきらない場合はtrueを返す
+                        isZoomIndexReset = false;
                         AutoAdjustSize(AjastType.Rotate);
+                        isZoomIndexReset = true;
 
                         //ウィンドウ位置調整
                         AutoAdjustLocation(ClientSize, clientAreaCenter);
 
                         //表示をリフレッシュ
                         pictureBox.Refresh();
-
-                        //タイトル変更
-                        ChangeTitle();
 
                         break;
                     case Keys.L://左右反転
@@ -719,6 +787,19 @@ namespace picview
             }
         }
 
+        //現在の拡大率
+        private double GetScale()
+        {
+            if (zoom100perSize.Width == 0) return 1;
+            if (zoom100perSize.Height == 0) return 1;
+
+            //拡大率
+            double rateX = (double)pictureBox.Width / zoom100perSize.Width;
+            double rateY = (double)pictureBox.Height / zoom100perSize.Height;
+            return Math.Min(rateX, rateY);
+        }
+
+        //タイトルバーの文字列設定
         private void ChangeTitle()
         {
             Text = Path.GetFileName(filepath);
@@ -727,25 +808,13 @@ namespace picview
                 //画像サイズ
                 Text += " (横" + fileImageSize.Width.ToString() + " x 縦" + fileImageSize.Height.ToString() + ")";
 
-                //基準画像サイズ
-                double fileImageWidth = fileImageSize.Width;
-                double fileImageHeight = fileImageSize.Height;
-                if (pictureBox.Image != null)
-                {
-                    fileImageWidth = pictureBox.Image.Width;
-                    fileImageHeight = pictureBox.Image.Height;
-                }
-                else if (isAnimationProcessing && animeRotateType % 2 != 0)//アニメーションで回転しているとき
-                {
-                    fileImageWidth = fileImageSize.Height;
-                    fileImageHeight = fileImageSize.Width;
-                }
-
                 //拡大率
-                double rateX = (double)pictureBox.Width / fileImageWidth;
-                double rateY = (double)pictureBox.Height / fileImageHeight;
-                double scale = Math.Min(rateX, rateY) * 100.0;
-                Text += " " + ((int)Math.Round(scale)).ToString() + "%";
+                if (!isNotCalcScale)
+                {
+                    currentZoomRatio = GetScale();
+                }
+                isNotCalcScale = false;
+                Text += " " + ((int)Math.Round(currentZoomRatio * 100.0)).ToString() + "%";
 
                 //何番目のファイルか
                 if (!isAlreadySearched || indexOfFile < 0 || countOfFiles < 0)
@@ -848,6 +917,7 @@ namespace picview
                             pictureBox.Image.RotateFlip(type);
                             fileImageSize = new Size(newImage.Width, newImage.Height);
                         }
+                        zoom100perSize = fileImageSize;
 
                         //サイズ調整
                         if (ajust)
@@ -877,10 +947,11 @@ namespace picview
         {
             if (!isImageExist) return false;
 
-            //回転指示の場合はまずベースサイズを回転
+            //回転指示の場合はまずベースサイズと拡大率を回転
             if (type == AjastType.Rotate)
             {
                 zoomBaseSize = new Size(zoomBaseSize.Height, zoomBaseSize.Width);
+                zoom100perSize = new Size(zoom100perSize.Height, zoom100perSize.Width);
             }
 
             //画像の狙いサイズを計算
@@ -890,9 +961,17 @@ namespace picview
                 //画像サイズそのまま
                 size = fileImageSize;
             }
+            else if (type == AjastType.Rotate)
+            {
+                //現在のサイズそのまま
+                double zwidth = (double)zoom100perSize.Width * currentZoomRatio;
+                double zheight = (double)zoom100perSize.Height * currentZoomRatio;
+                size = new Size((int)zwidth, (int)zheight);
+            }
             else
             {
                 //基準ズームサイズ
+                if (zoomIndex < 0) return false;
                 double zwidth = (double)zoomBaseSize.Width * (double)zoomRatioArray[zoomIndex] / 100.0;
                 double zheight = (double)zoomBaseSize.Height * (double)zoomRatioArray[zoomIndex] / 100.0;
                 size = new Size((int)zwidth, (int)zheight);
