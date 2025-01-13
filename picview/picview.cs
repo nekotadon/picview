@@ -21,11 +21,12 @@ namespace picview
         private string filepath { get; set; }
         //表示対象の拡張子
         private string[] pictureExt = { ".bmp", ".jpg", ".jpeg", ".png", ".gif" };
-        //初期表示時のサイズ（画像がスクリーンより小さい場合は拡大縮小なしのサイズ）
-        private Size baseSize = new Size(100, 100);
-        //表示拡大率
+        //画像サイズ
+        private Size FileImageSize = new Size(100, 100);//ファイルの本当のサイズ
+        //表示拡大
         private int zoomIndex;//現在の配列番号
         private int[] zoomRatioArray = { };//拡大率の配列
+        private Size zoomBaseSize = new Size(100, 100);//拡大率100%のサイズ
         //ウィンドウ領域、ウィンドウ可視領域、クライアント領域それぞれの上下左右の差分
         private WindowSizeMethod.BorderWidth border = new WindowSizeMethod.BorderWidth();
         //タイトルバーの有無
@@ -54,6 +55,13 @@ namespace picview
                 if (arguments.Length == 2)
                 {
                     ChangeFile(arguments[1]);
+                }
+            };
+            SizeChanged += (sender, e) =>
+            {
+                if (WindowState == FormWindowState.Normal)
+                {
+                    ChangeTitle();
                 }
             };
             KeyPreview = true;
@@ -337,8 +345,8 @@ namespace picview
                         if (zoomIndex != zoomIndexCurrent)//拡大縮小率が変更された場合
                         {
                             //変更後のサイズを計算
-                            double width = baseSize.Width * zoomRatioArray[zoomIndex] / 100.0;
-                            double height = baseSize.Height * zoomRatioArray[zoomIndex] / 100.0;
+                            double width = zoomBaseSize.Width * zoomRatioArray[zoomIndex] / 100.0;
+                            double height = zoomBaseSize.Height * zoomRatioArray[zoomIndex] / 100.0;
                             Size nextSize = new Size((int)width, (int)height);
 
                             //変更前のマウス位置(pictureBox基準)
@@ -370,7 +378,7 @@ namespace picview
                             */
 
                             //画面内に収まるようにクライアントサイズとpictureBoxサイズ調整。スクリーンに収まりきらない場合はtrueを返す
-                            bool isFixed = AutoAdjustSize(nextSize, false);
+                            bool isFixed = AutoAdjustSize(nextSize, AjastType.Zoom);
 
                             //ウィンドウ位置調整
                             AutoAdjustLocation(ClientSize, isFixed ? null : (Point?)Cursor.Position);//縮小されている場合はマウスの位置を中心にしない
@@ -464,7 +472,7 @@ namespace picview
                             }
                             else//前のファイルに移動する場合
                             {
-                                if (i >= 1)//今のファイルが最初のファイルでなければ
+                                if (i > 0)//今のファイルが最初のファイルでなければ
                                 {
                                     //表示画像変更
                                     ChangeFile(files[i - 1]);
@@ -472,18 +480,7 @@ namespace picview
                                 }
                             }
 
-                            //拡大率をリセット
-                            ZoomIndexReset();
-
-                            //画面内に収まるようにクライアントサイズとpictureBoxサイズ調整。スクリーンに収まりきらない場合はtrueを返す
-                            AutoAdjustSize(pictureBox.Image.Size);
-
-                            //ウィンドウ位置調整
-                            AutoAdjustLocation(ClientSize, Cursor.Position);
-
-                            //タイトル変更
-                            ChangeTitle();
-
+                            //今と同じファイルなら何もしない
                             break;
                         }
                     }
@@ -514,8 +511,15 @@ namespace picview
                         //回転
                         pictureBox.Image.RotateFlip(RotateFlipType.Rotate90FlipNone);
 
+                        //ベースサイズ回転
+                        zoomBaseSize = new Size(zoomBaseSize.Height, zoomBaseSize.Width);
+
+                        //現在のサイズ取得
+                        double width = zoomBaseSize.Width * zoomRatioArray[zoomIndex] / 100.0;
+                        double height = zoomBaseSize.Height * zoomRatioArray[zoomIndex] / 100.0;
+
                         //画面内に収まるようにクライアントサイズとpictureBoxサイズ調整。スクリーンに収まりきらない場合はtrueを返す
-                        AutoAdjustSize(pictureBox.Image.Size);
+                        AutoAdjustSize(new Size((int)width, (int)height), AjastType.Rotate);
 
                         //ウィンドウ位置調整
                         AutoAdjustLocation(ClientSize, clientAreaCenter);
@@ -556,6 +560,7 @@ namespace picview
                 {
                     Invoke(new Action(() =>
                     {
+                        //ファイル変更処理開始
                         ChangeFileAction(file, ajust);
                         ChangeTitle();
                         Cursor = Cursors.Default;
@@ -570,19 +575,14 @@ namespace picview
             Text = Path.GetFileName(filepath);
             if (pictureBox.Image != null)
             {
-                Text += " (横" + pictureBox.Image.Width.ToString() + " x 縦" + pictureBox.Image.Height.ToString() + ")";
+                //画像サイズ
+                Text += " (横" + FileImageSize.Width.ToString() + " x 縦" + FileImageSize.Height.ToString() + ")";
 
-                double percent;
-                if (pictureBox.Image.Width / pictureBox.Image.Height > pictureBox.Width / pictureBox.Height)//横長
-                {
-                    percent = (double)pictureBox.Width / (double)pictureBox.Image.Width * 100.0;
-                }
-                else//縦長
-                {
-                    percent = (double)pictureBox.Height / (double)pictureBox.Image.Height * 100.0;
-                }
-
-                Text += " " + ((int)Math.Round(percent)).ToString() + "%";
+                //拡大率
+                double rateX = (double)pictureBox.Width / pictureBox.Image.Width;
+                double rateY = (double)pictureBox.Height / pictureBox.Image.Height;
+                double scale = Math.Min(rateX, rateY) * 100.0;
+                Text += " " + ((int)Math.Round(scale)).ToString() + "%";
             }
         }
 
@@ -618,6 +618,9 @@ namespace picview
                     //読み込みができた場合
                     if (newImage != null)
                     {
+                        //画像サイズ取得
+                        FileImageSize = new Size(newImage.Width, newImage.Height);
+
                         //画像が設定されている場合は一度削除
                         if (pictureBox.Image != null)
                         {
@@ -647,7 +650,7 @@ namespace picview
                         if (ajust)
                         {
                             //画面内に収まるようにクライアントサイズとpictureBoxサイズ調整。スクリーンに収まりきらない場合はtrueを返す
-                            AutoAdjustSize(pictureBox.Image.Size);
+                            AutoAdjustSize(pictureBox.Image.Size, AjastType.FileChange);
 
                             //ウィンドウ位置調整
                             AutoAdjustLocation(ClientSize, Cursor.Position);
@@ -658,7 +661,13 @@ namespace picview
         }
 
         //画面内に収まるようにクライアントサイズとpictureBoxサイズ調整。スクリーンに収まりきらない場合はtrueを返す
-        private bool AutoAdjustSize(Size size, bool isFileChanged = true)
+        enum AjastType
+        {
+            FileChange,
+            Zoom,
+            Rotate
+        }
+        private bool AutoAdjustSize(Size size, AjastType type)
         {
             //縮小したか
             bool isFixed = false;
@@ -683,17 +692,17 @@ namespace picview
                 if (imageWidth / imageHeight > workareaWidth / workareaHeight)//横長（高さが高いほど、つまり縦長ほど値が小さくなる。値が大きいということは横長）
                 {
                     w = workareaWidth;//幅は作業領域幅と同じまでとする
-                    if (isFileChanged)
+                    if (type == AjastType.FileChange)
                     {
                         hbase = h = Math.Floor(imageHeight * workareaWidth / imageWidth);//高さは比率で計算
                         if (force100per)
                         {
                             h = imageHeight <= workareaHeight ? imageHeight : workareaHeight;
-                            baseSize = size;
+                            zoomBaseSize = size;
                         }
                         else
                         {
-                            baseSize = new Size((int)w, (int)hbase);
+                            zoomBaseSize = new Size((int)w, (int)hbase);
                         }
                     }
                     else
@@ -704,17 +713,17 @@ namespace picview
                 else//縦長
                 {
                     h = workareaHeight;//高さは作業領域高さと同じまでとする
-                    if (isFileChanged)
+                    if (type == AjastType.FileChange)
                     {
                         wbase = w = Math.Floor(imageWidth * workareaHeight / imageHeight);//幅は比率で計算
                         if (force100per)
                         {
                             w = imageWidth <= workareaWidth ? imageWidth : workareaWidth;
-                            baseSize = size;
+                            zoomBaseSize = size;
                         }
                         else
                         {
-                            baseSize = new Size((int)wbase, (int)h);
+                            zoomBaseSize = new Size((int)wbase, (int)h);
                         }
                     }
                     else
@@ -726,14 +735,14 @@ namespace picview
             }
             else
             {
-                if (isFileChanged)
+                if (type == AjastType.FileChange)
                 {
-                    baseSize = size;
+                    zoomBaseSize = size;
                 }
                 ClientSize = size;
             }
 
-            if (isFileChanged)//ファイル変更時
+            if (type == AjastType.FileChange)//ファイル変更時
             {
                 if (!force100per)//100%固定でない場合
                 {
