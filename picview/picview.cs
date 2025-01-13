@@ -6,6 +6,7 @@ using System.Linq;
 using System.Windows.Forms;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
+using System.Drawing.Imaging;
 
 namespace picview
 {
@@ -23,6 +24,8 @@ namespace picview
         private string[] pictureExt = { ".bmp", ".jpg", ".jpeg", ".png", ".gif" };
         //画像サイズ
         private Size FileImageSize = new Size(100, 100);//ファイルの本当のサイズ
+        //アニメーションgifかどうか
+        private bool animegif = false;
         //表示拡大
         private int zoomIndex;//現在の配列番号
         private int[] zoomRatioArray = { };//拡大率の配列
@@ -344,11 +347,6 @@ namespace picview
                         //変更後のサイズ
                         if (zoomIndex != zoomIndexCurrent)//拡大縮小率が変更された場合
                         {
-                            //変更後のサイズを計算
-                            double width = zoomBaseSize.Width * zoomRatioArray[zoomIndex] / 100.0;
-                            double height = zoomBaseSize.Height * zoomRatioArray[zoomIndex] / 100.0;
-                            Size nextSize = new Size((int)width, (int)height);
-
                             //変更前のマウス位置(pictureBox基準)
                             Point pointMouse = panel.PointToClient(Cursor.Position);
                             Point pointscroll = panel.AutoScrollPosition;
@@ -378,10 +376,10 @@ namespace picview
                             */
 
                             //画面内に収まるようにクライアントサイズとpictureBoxサイズ調整。スクリーンに収まりきらない場合はtrueを返す
-                            bool isFixed = AutoAdjustSize(nextSize, AjastType.Zoom);
+                            bool isFixed = AutoAdjustSize(AjastType.Zoom);
 
                             //ウィンドウ位置調整
-                            AutoAdjustLocation(ClientSize, isFixed ? null : (Point?)Cursor.Position);//縮小されている場合はマウスの位置を中心にしない
+                            AutoAdjustLocation(ClientSize, Cursor.Position);
 
                             //スクロールバーの位置調整
                             if (panel.HorizontalScroll.Visible || panel.VerticalScroll.Visible)//スクロールバーが表示されている場合
@@ -405,8 +403,6 @@ namespace picview
                                 double nextPointScrollX = Sxdash - Cxdash;
                                 double nextPointScrollY = Sydash - Cydash;
                                 panel.AutoScrollPosition = new Point((int)nextPointScrollX, (int)nextPointScrollY);
-
-
 
                                 /*
                                                Sx'
@@ -511,15 +507,8 @@ namespace picview
                         //回転
                         pictureBox.Image.RotateFlip(RotateFlipType.Rotate90FlipNone);
 
-                        //ベースサイズ回転
-                        zoomBaseSize = new Size(zoomBaseSize.Height, zoomBaseSize.Width);
-
-                        //現在のサイズ取得
-                        double width = zoomBaseSize.Width * zoomRatioArray[zoomIndex] / 100.0;
-                        double height = zoomBaseSize.Height * zoomRatioArray[zoomIndex] / 100.0;
-
                         //画面内に収まるようにクライアントサイズとpictureBoxサイズ調整。スクリーンに収まりきらない場合はtrueを返す
-                        AutoAdjustSize(new Size((int)width, (int)height), AjastType.Rotate);
+                        AutoAdjustSize(AjastType.Rotate);
 
                         //ウィンドウ位置調整
                         AutoAdjustLocation(ClientSize, clientAreaCenter);
@@ -561,6 +550,7 @@ namespace picview
                     Invoke(new Action(() =>
                     {
                         //ファイル変更処理開始
+                        animegif = false;
                         ChangeFileAction(file, ajust);
                         ChangeTitle();
                         Cursor = Cursors.Default;
@@ -618,9 +608,6 @@ namespace picview
                     //読み込みができた場合
                     if (newImage != null)
                     {
-                        //画像サイズ取得
-                        FileImageSize = new Size(newImage.Width, newImage.Height);
-
                         //画像が設定されている場合は一度削除
                         if (pictureBox.Image != null)
                         {
@@ -633,24 +620,40 @@ namespace picview
                         //画像ファイルパス更新
                         filepath = file;
 
-                        //透過色が有効な画像フォーマットの場合
+                        //透過色を無効にして通常背景色にする
+                        TransparencyKey = Color.Empty;
+                        BackColor = pictureBox.BackColor = panel.BackColor = SystemColors.Control;
+
+                        //透過色が有効な画像フォーマットの場合で透過色がある場合
                         if (ext == ".gif" || ext == ".png")
                         {
+                            Color trans = GetTransparentColor(newImage);
                             //背景を透明にする
-                            BackColor = pictureBox.BackColor = panel.BackColor = TransparencyKey = Color.DarkGoldenrod;
+                            if (trans != Color.Empty)
+                            {
+                                pictureBox.BackColor = panel.BackColor = TransparencyKey = Color.DarkGoldenrod;
+                            }
                         }
-                        else
+
+                        //アニメーションgifかどうか
+                        animegif = ext == ".gif" && newImage.RawFormat.Equals(ImageFormat.Gif) && ImageAnimator.CanAnimate(newImage);
+
+                        //jpgの場合はExif情報に基づいて回転
+                        if (ext == ".jpg" || ext == ".jpeg")
                         {
-                            //透過色を無効にして通常背景色にする
-                            TransparencyKey = Color.Empty;
-                            BackColor = pictureBox.BackColor = panel.BackColor = SystemColors.Control;
+                            ushort orientation = GetExifOrientation(newImage);
+                            RotateFlipType type = GetRotateFlipType(orientation);
+                            pictureBox.Image.RotateFlip(type);
                         }
+
+                        //画像サイズ取得
+                        FileImageSize = new Size(pictureBox.Image.Width, pictureBox.Image.Height);
 
                         //サイズ調整
                         if (ajust)
                         {
                             //画面内に収まるようにクライアントサイズとpictureBoxサイズ調整。スクリーンに収まりきらない場合はtrueを返す
-                            AutoAdjustSize(pictureBox.Image.Size, AjastType.FileChange);
+                            AutoAdjustSize(AjastType.FileChange);
 
                             //ウィンドウ位置調整
                             AutoAdjustLocation(ClientSize, Cursor.Position);
@@ -667,8 +670,31 @@ namespace picview
             Zoom,
             Rotate
         }
-        private bool AutoAdjustSize(Size size, AjastType type)
+        private bool AutoAdjustSize(AjastType type)
         {
+            if (pictureBox.Image == null) return false;
+
+            //回転指示の場合はまずベースサイズを回転
+            if (type == AjastType.Rotate)
+            {
+                zoomBaseSize = new Size(zoomBaseSize.Height, zoomBaseSize.Width);
+            }
+
+            //画像の狙いサイズを計算
+            Size size;
+            if (type == AjastType.FileChange)//新規ファイル読み込み時
+            {
+                //画像サイズそのまま
+                size = pictureBox.Image.Size;
+            }
+            else
+            {
+                //基準ズームサイズ
+                double zwidth = (double)zoomBaseSize.Width * (double)zoomRatioArray[zoomIndex] / 100.0;
+                double zheight = (double)zoomBaseSize.Height * (double)zoomRatioArray[zoomIndex] / 100.0;
+                size = new Size((int)zwidth, (int)zheight);
+            }
+
             //縮小したか
             bool isFixed = false;
 
@@ -774,21 +800,17 @@ namespace picview
 
         //ウィンドウ位置調整
         //通常はマウスの中心=ウィンドウの中心となるように第2引数にCursor.Positionを設定
-        private void AutoAdjustLocation(Size size, Point? centerPoint = null)
+        private void AutoAdjustLocation(Size size, Point centerPoint)
         {
             //作業領域（ディスプレイのデスクトップ領域からタスクバーをのぞいた領域）の高さと幅を取得
             Rectangle workarea = Screen.GetWorkingArea(this);
-
-            //指示の有無
-            bool isUseIndicatedPoint = centerPoint != null;
-            Point indicatedPoint = centerPoint ?? new Point(0, 0);
 
             /////////////
             //左端調整
             /////////////
 
-            //通常はマウスの中心=ウィンドウの中心。拡大縮小によって画面内に収まらない場合は一旦変更なし
-            double left = isUseIndicatedPoint ? (indicatedPoint.X - size.Width / 2.0 - border.Left - border.GapLeft) : Left;
+            //指示された点が中心になるようにする
+            double left = centerPoint.X - size.Width / 2.0 - border.Left - border.GapLeft;
 
             //作業領域の一番左の点（最左端）を取得
             double leftEnd = workarea.Left;
@@ -830,7 +852,7 @@ namespace picview
             /////////////
 
             //処理は左端調整と同じ
-            double top = isUseIndicatedPoint ? (indicatedPoint.Y - size.Height / 2.0 - border.Top - border.GapTop) : Top;
+            double top = centerPoint.Y - size.Height / 2.0 - border.Top - border.GapTop;
 
             //作業領域の一番左の点（最左端）を取得し必要に応じて修正
             double topEnd = workarea.Top;
@@ -907,6 +929,123 @@ namespace picview
             }
         }
         */
+
+        //透過色取得
+        public Color GetTransparentColor(Image image)
+        {
+            // 画像がGIFの場合
+            if (image.RawFormat.Equals(ImageFormat.Gif))
+            {
+                // GIFの場合、カラーパレットを確認
+                if (image.PixelFormat == PixelFormat.Format8bppIndexed)
+                {
+                    ColorPalette palette = ((Bitmap)image).Palette;
+                    for (int i = 0; i < palette.Entries.Length; i++)
+                    {
+                        // 透過色が設定されているか確認
+                        if (palette.Entries[i].A == 0)
+                        {
+                            Color color = palette.Entries[i];
+                            return Color.FromArgb(255, color.R, color.G, color.B); // 透過色を返す
+                        }
+                    }
+                }
+            }
+
+            //上記で判定できない場合
+            // ピクセルフォーマットを確認
+            if (image.PixelFormat == PixelFormat.Format16bppArgb1555 ||
+                image.PixelFormat == PixelFormat.Format32bppArgb)
+            {
+                if (image.Height <= 20 || image.Width <= 20)
+                {
+                    // 画像の各ピクセルを調べて透過色を探す
+                    for (int y = 0; y < image.Height; y++)
+                    {
+                        for (int x = 0; x < image.Width; x++)
+                        {
+                            Color pixelColor = ((Bitmap)image).GetPixel(x, y);
+                            // アルファ値が0のピクセルを見つけた場合
+                            if (pixelColor.A == 0)
+                            {
+                                Color color = pixelColor;
+                                return Color.FromArgb(255, color.R, color.G, color.B); // 透過色を返す
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    //4隅だけ確認
+                    bool y1st, x1st;
+                    y1st = x1st = true;
+                    for (int y = 0; y < image.Height; y++)
+                    {
+                        for (int x = 0; x < image.Width; x++)
+                        {
+                            Color pixelColor = ((Bitmap)image).GetPixel(x, y);
+                            // アルファ値が0のピクセルを見つけた場合
+                            if (pixelColor.A == 0)
+                            {
+                                Color color = pixelColor;
+                                return Color.FromArgb(255, color.R, color.G, color.B); // 透過色を返す
+                            }
+                            if (x == 10 && x1st)
+                            {
+                                x1st = false;
+                                x = image.Width - 10;
+                            }
+                        }
+                        if (y == 10 && y1st)
+                        {
+                            y1st = false;
+                            y = image.Height - 10;
+                        }
+                    }
+                }
+            }
+
+            return Color.Empty; // 透過色は設定されていない
+        }
+
+        //jpegの中の回転角度を確認
+        private ushort GetExifOrientation(Image image)
+        {
+            foreach (PropertyItem prop in image.PropertyItems)
+            {
+                if (prop.Id == 0x0112) // OrientationのID
+                {
+                    return BitConverter.ToUInt16(prop.Value, 0);
+                }
+            }
+            return 1; // デフォルトは1（回転なし）
+        }
+
+        //jpegをExifをもとに回転指示作成
+        private RotateFlipType GetRotateFlipType(ushort orientation)
+        {
+            switch (orientation)
+            {
+                case 1: // Normal
+                    return RotateFlipType.RotateNoneFlipNone;
+                case 3: // 180度回転
+                    return RotateFlipType.Rotate180FlipNone;
+                case 6: // 90度時計回り
+                    return RotateFlipType.Rotate90FlipNone;
+                case 8: // 90度反時計回り
+                    return RotateFlipType.Rotate270FlipNone;
+                case 2: // 水平反転
+                    return RotateFlipType.RotateNoneFlipX;
+                case 4: // 垂直反転
+                    return RotateFlipType.RotateNoneFlipY;
+                case 5: // 水平反転 + 90度時計回り
+                    return RotateFlipType.Rotate90FlipX;
+                case 7: // 水平反転 + 90度反時計回り
+                    return RotateFlipType.Rotate270FlipX;
+                default:
+                    return RotateFlipType.RotateNoneFlipNone;
+            }
+        }
     }
 
     //ファイル名を自然順でソートするためのクラス
