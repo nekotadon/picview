@@ -30,8 +30,7 @@ namespace picview
         private bool isAlreadySearched = false;//フォルダ内のファイル数確認済み
         //表示拡大
         private double currentZoomRatio = 1.0;//現在の拡大率
-        private bool isNotCalcScale = false;//拡大率計算一時無効
-        private bool isZoomIndexReset = false;//拡大率リセット
+        private bool isSizeChangedByUser = false;//拡大率リセット
         private int zoomIndex;//現在の配列番号
         private int[] zoomRatioArray = { };//拡大率の配列
         private Size zoomBaseSize = new Size(100, 100);//拡大率100%のサイズ
@@ -55,6 +54,8 @@ namespace picview
         private bool mouseCenterMove = false;//起動時にマウスを中央に移動
         private bool kidouji = true;//初回起動中
         private bool force100per = false;//初期状態では常に100%表示
+        //その他
+        int DToI(double value) => (int)Math.Round(value);//doubleをintに変換
 
         public picview()
         {
@@ -99,9 +100,16 @@ namespace picview
             {
                 if (WindowState == FormWindowState.Normal)
                 {
-                    if (isZoomIndexReset)
+                    if (isSizeChangedByUser)//ユーザーによる操作
                     {
                         zoomIndex = -1;
+                        if (!panel.HorizontalScroll.Visible && !panel.VerticalScroll.Visible)//スクロールバーが表示されている場合
+                        {
+                            //拡大率変更
+                            double rateX = (double)pictureBox.Width / fileImageSize.Width;
+                            double rateY = (double)pictureBox.Height / fileImageSize.Height;
+                            currentZoomRatio = Math.Min(rateX, rateY);
+                        }
                     }
                     ChangeTitle();
                 }
@@ -156,6 +164,7 @@ namespace picview
             {
                 //起動時は遅延しない
                 if (isfirstImage) return;
+                if (duringImageChange) return;
 
                 //回転等のマニュアル操作時
                 if (atMaunal)
@@ -352,9 +361,9 @@ namespace picview
                     toolStripMenuItem_sub.Click += (sender1, e1) =>
                     {
                         //タイトルバーの表示切替
-                        isZoomIndexReset = false;
+                        isSizeChangedByUser = false;
                         FormBorderStyle = isTitlebarExist ? FormBorderStyle.None : FormBorderStyle.Sizable;
-                        isZoomIndexReset = true;
+                        isSizeChangedByUser = true;
 
                         //設定変更
                         iniFile.SetKeyValueBool("setting", "window", FormBorderStyle != FormBorderStyle.None);
@@ -445,7 +454,7 @@ namespace picview
                     if (!normal)
                     {
                         currentH = fileImageSize.Height * currentZoomRatio;
-                        int currentRatio = (int)Math.Round(currentH / zoomBaseSize.Height * 100.0);
+                        int currentRatio = DToI(currentH / zoomBaseSize.Height * 100.0);
 
                         if (currentRatio <= zoomRatioArray[0])
                         {
@@ -507,38 +516,35 @@ namespace picview
                         double pointMouseAbsY = pointMouse.Y - pointscroll.Y;
                         /*
                                 ↓pictureBox(0,0)
-                                ┌───────┬──────────────────────┐
-                                │       │                      │
-                                │       │ - pointscroll.Y      │
-                                │       │   (always Y<0)       │
-                                │       ▼                      │
-                                ├──────>┌─────┬───────┐        │
-                       - pointscroll.X  │     │ pointMouse.Y   │
-                         (always X<0)   │     │       │        │
-                                │       │     ▼       │        │
-                                │       ├────>*       │        │ *:変更前のマウス位置(pictureBox基準)
-                                │       │pointMouse.X │        │
-                                │       │ Client Area │        │
-                                │       │ (View Area) │        │
-                                │       └─────────────┘        │
-                                │                              │
-                                │   pictureBox Area            │
-                                │   (Invisible Area)           │
-                                │                              │
-                                └──────────────────────────────┘
+                                +-------+----------------------+
+                                |       |                      |
+                                |       | - pointscroll.Y      |
+                                |       |   (always Y<0)       |
+                                |       !                      |
+                                +------>+-----+-------+        |
+                       - pointscroll.X  |     | pointMouse.Y   |
+                         (always X<0)   |     |       |        |
+                                |       |     !       |        |
+                                |       +---->*       |        |  * : 変更前のマウス位置(pictureBox基準)
+                                |       |pointMouse.X |        |
+                                |       | Client Area |        |
+                                |       | (View Area) |        |
+                                |       +-------------+        |
+                                |                              |
+                                |   pictureBox Area            |
+                                |   (Invisible Area)           |
+                                |                              |
+                                +------------------------------+
                         */
-
 
                         //変更後のサイズ
                         if (zoomIndex < 0) return;
                         double zwidth = (double)zoomBaseSize.Width * (double)zoomRatioArray[zoomIndex] / 100.0;
                         double zheight = (double)zoomBaseSize.Height * (double)zoomRatioArray[zoomIndex] / 100.0;
-                        Size size = new Size((int)zwidth, (int)zheight);
+                        Size size = new Size(DToI(zwidth), DToI(zheight));
 
                         //画面内に収まるようにクライアントサイズとpictureBoxサイズ調整。スクリーンに収まりきらない場合はtrueを返す
-                        isZoomIndexReset = false;
                         AutoAdjustSize(size);
-                        isZoomIndexReset = true;
 
                         //ウィンドウ位置調整
                         AutoAdjustLocation(ClientSize, Cursor.Position);
@@ -546,6 +552,9 @@ namespace picview
                         //スクロールバーの位置調整
                         if (panel.HorizontalScroll.Visible || panel.VerticalScroll.Visible)//スクロールバーが表示されている場合
                         {
+                            //タイトル変更
+                            ChangeTitle();
+
                             //変更前からの拡大率（1超過なら拡大、1未満なら縮小）。例えば150→200であれば200/150=1.33倍
                             double ratio;
                             if (normal)
@@ -573,25 +582,25 @@ namespace picview
                             //pictureBox内のマウス位置は変更前後で同じになるようにスクロールバーの位置を設定
                             double nextPointScrollX = Sxdash - Cxdash;
                             double nextPointScrollY = Sydash - Cydash;
-                            panel.AutoScrollPosition = new Point((int)nextPointScrollX, (int)nextPointScrollY);
+                            panel.AutoScrollPosition = new Point(DToI(nextPointScrollX), DToI(nextPointScrollY));
 
                             /*
                                            Sx'
-                                |<────────────────│    ↓変更後のpictureBox
-                                ┌───────────────────────────────────── 
-                                │          Sx      
-                                │   |<────────────│    ↓変更前のpictureBox
-                                │   ┌──────────────────────────────┐  B   = - pointscroll.X(変更前)  取得時は負
-                                │   │             │                │  B'  = nextPointScrollX(変更後) 設定するときは正  
-                                │   │       ┌─────────────┐        │  Cx  = pointMouse.X
-                                │   │  Bx'  │ Cx' │       │        │  Sx  = Bx + Cx = pointMouseAbsX
-                                ├───├──────>├────>│       │        │  Sx' = Sx * ratio
-                                │   │  Bx   │ Cx  │       │        │      = pointMouseAbsX * ratio
-                                │   ├──────>├────>*       │        │
-                                │   │       │             │        │  Bx' = Sx' - Cx'
-                                │   │       │ Client Area │        │
-                                │   │       │ (View Area) │        │
-                                │   │       └─────────────┘        │
+                                |<----------------|    ↓変更後のpictureBox
+                                +------------------------------------- 
+                                |          Sx      
+                                |   |<------------|    ↓変更前のpictureBox
+                                |   +------------------------------+  Bx  = - pointscroll.X(変更前)  取得時は負
+                                |   |             |                |  Bx' = nextPointScrollX(変更後) 設定するときは正  
+                                |   |       +-------------+        |  Cx  = Cx' = pointMouse.X
+                                |   |  Bx'  | Cx' |       |        |  Sx  = Bx + Cx = pointMouseAbsX
+                                +---------->+---->|       |        |  Sx' = Sx * ratio
+                                |   |  Bx   | Cx  |       |        |      = pointMouseAbsX * ratio
+                                |   +------>+---->*       |        |
+                                |   |       |             |        |  Bx' = Sx' - Cx'
+                                |   |       | Client Area |        |
+                                |   |       | (View Area) |        |
+                                |   |       +-------------+        |
                             */
                         }
                     }
@@ -644,7 +653,7 @@ namespace picview
                         Rectangle clientRectangle = RectangleToScreen(ClientRectangle);
 
                         //変更前のスクリーン座標でのクライアント領域の中心
-                        Point clientAreaCenter = new Point((int)(clientRectangle.X + (double)clientRectangle.Width / 2.0), (int)(clientRectangle.Y + (double)clientRectangle.Height / 2.0));
+                        Point clientAreaCenter = new Point(DToI(clientRectangle.X + (double)clientRectangle.Width / 2.0), DToI(clientRectangle.Y + (double)clientRectangle.Height / 2.0));
 
                         //回転
                         if (isAnimationProcessing)
@@ -657,9 +666,6 @@ namespace picview
                             pictureBox.Image.RotateFlip(RotateFlipType.Rotate90FlipNone);
                         }
 
-                        //拡大率再計算不要
-                        isNotCalcScale = true;
-
                         //基準サイズ回転
                         zoomBaseSize = new Size(zoomBaseSize.Height, zoomBaseSize.Width);
                         fileImageSize = new Size(fileImageSize.Height, fileImageSize.Width);
@@ -667,12 +673,10 @@ namespace picview
                         //変更後のサイズは現在のサイズそのまま
                         double zwidth = (double)fileImageSize.Width * currentZoomRatio;
                         double zheight = (double)fileImageSize.Height * currentZoomRatio;
-                        Size size = new Size((int)zwidth, (int)zheight);
+                        Size size = new Size(DToI(zwidth), DToI(zheight));
 
                         //サイズ調整
-                        isZoomIndexReset = false;
                         AutoAdjustSize(size);
-                        isZoomIndexReset = true;
 
                         //ウィンドウ位置調整
                         AutoAdjustLocation(ClientSize, clientAreaCenter);
@@ -829,12 +833,7 @@ namespace picview
                 Text += " (横" + fileImageSizeAbs.Width.ToString() + " x 縦" + fileImageSizeAbs.Height.ToString() + ")";
 
                 //拡大率
-                if (!isNotCalcScale)
-                {
-                    currentZoomRatio = GetScale();
-                }
-                isNotCalcScale = false;
-                Text += " " + ((int)Math.Round(currentZoomRatio * 100.0)).ToString() + "%";
+                Text += " " + DToI(currentZoomRatio * 100.0).ToString() + "%";
 
                 //何番目のファイルか
                 if (!isAlreadySearched || indexOfFile < 0 || countOfFiles < 0)
@@ -907,7 +906,29 @@ namespace picview
                             //背景を透明にする
                             if (transColor != Color.Empty)
                             {
-                                pictureBox.BackColor = panel.BackColor = TransparencyKey = (transColor.R != transColor.B) ? transColor : Color.DarkGoldenrod;
+                                //透過色設定
+                                Color transColorFixed = transColor;
+                                int transR = transColor.R;
+                                int transG = transColor.G;
+                                int transB = transColor.B;
+                                if (transR == transB)
+                                {
+                                    if (transR == 0)
+                                    {
+                                        transR = 1;
+                                    }
+                                    else if (transR == 255)
+                                    {
+                                        transR = 254;
+                                    }
+                                    else
+                                    {
+                                        transR++;
+                                    }
+                                    transColorFixed = Color.FromArgb(255, transR, transG, transB);
+                                }
+
+                                pictureBox.BackColor = panel.BackColor = TransparencyKey = transColorFixed;
                             }
                         }
 
@@ -994,7 +1015,7 @@ namespace picview
                 double rate = Math.Min(rateX, rateY);
                 double w = (double)targetSize.Width * rate;
                 double h = (double)targetSize.Height * rate;
-                return new Size((int)w, (int)h);
+                return new Size(DToI(w), DToI(h));
             }
         }
 
@@ -1013,15 +1034,23 @@ namespace picview
             double workareaHeight = workarea.Height - border.Height;
             double workareaWidth = workarea.Width - border.Width;
 
-            return new Size(Math.Min(targetSize.Width, (int)workareaWidth), Math.Min(targetSize.Height, (int)workareaHeight));
+            return new Size(Math.Min(targetSize.Width, DToI(workareaWidth)), Math.Min(targetSize.Height, DToI(workareaHeight)));
         }
 
-        private void AutoAdjustSize(Size size, bool fix = false)//@@@
+        private void AutoAdjustSize(Size size, bool fix = false)
         {
             if (!isImageExist) return;
 
+            //ユーザによる操作でない
+            isSizeChangedByUser = false;
+
             //修正後のサイズを計算
             Size fixedSize = GetOverlappingSize(size);
+
+            //拡大率変更
+            double rateX = (double)size.Width / fileImageSize.Width;
+            double rateY = (double)size.Height / fileImageSize.Height;
+            currentZoomRatio = Math.Min(rateX, rateY);
 
             //クライアント領域のサイズ変更
             ClientSize = fixedSize;
@@ -1036,6 +1065,9 @@ namespace picview
                 pictureBox.Dock = DockStyle.None;
                 pictureBox.Size = size;
             }
+
+            //初期化
+            isSizeChangedByUser = true;
         }
 
         //ウィンドウ位置調整
@@ -1049,6 +1081,28 @@ namespace picview
             //左端調整
             /////////////
 
+            /*
+                     border.GapLeft     +        border.Right = border.Width
+                        |<->|                        |<->|
+                        +------------------------------------+
+                        |   +----------------------------+   |
+                        |   |   +--------------------+   |   |
+                        |   |   |                    |   |   |
+                   Left | 1 | 2 |          3         | 4 |   |
+                   ---->|<->|<->|<------------------>|<->|   |
+                        |   |   |     size.Width     |   |   |
+                        |   |   |                  A | B | C |
+                        |   |   +--------------------+   |   |
+                        |   +----------------------------+   |
+                        +------------------------------------+
+                            |                            |
+                          leftEnd                     rightEnd
+                   
+                    A:ClientArea（クライアント領域）＝関数の第1引数size
+                    B:WindowArea（ウィンドウ可視領域）
+                    C:VirtualWindowArea（ウィンドウ領域）
+            */
+
             //指示された点が中心になるようにする
             double left = centerPoint.X - (double)size.Width / 2.0 - border.Left - border.GapLeft;
 
@@ -1060,20 +1114,6 @@ namespace picview
             {
                 left = leftEnd - border.GapLeft;
             }
-            /*
-                      ↓border.Left  +  ↓border.Right = border.Width
-            GapLeft─>│ │               | |                    
-                   ┌─┼─────────────────────┐
-                   │ ├───────────────────┐ │
-              Left │ │ ┌───────────────┐ │ │ A:ClientArea（クライアント領域）＝関数の第1引数size
-              ────>│1│2│<------3------>│4│ │ B:WindowArea（ウィンドウ可視領域）
-                   │ │ │              A│ │ │ C:VirtualWindowArea（ウィンドウ領域）
-                   │ │ └───────────────┘B│ │
-                   │ ├───────────────────┘C│
-                   └─┼─────────────────────┘
-                     │                   │                      
-                     ↑leftEnd            ↑rightEnd
-            */
 
             //作業領域の一番右の点（最右端）を取得
             double rightEnd = workarea.Left + workarea.Width;
@@ -1085,7 +1125,7 @@ namespace picview
             }
 
             //修正結果を代入
-            Left = (int)left;
+            Left = DToI(left);
 
             /////////////
             //上端調整
@@ -1109,7 +1149,7 @@ namespace picview
             }
 
             //修正結果を代入
-            Top = (int)top;
+            Top = DToI(top);
         }
 
         //拡大率をリセット

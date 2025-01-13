@@ -15,24 +15,6 @@ namespace picview
         public static Color GetTransparentColor(Image image, string filepath = "")
         {
             // 画像がGIFの場合
-            /*
-            if (image.RawFormat.Equals(ImageFormat.Gif))
-            {
-                // GIFの場合、カラーパレットを確認
-                if (image.PixelFormat == PixelFormat.Format8bppIndexed)
-                {
-                    ColorPalette palette = ((Bitmap)image).Palette;
-                    for (int i = 0; i < palette.Entries.Length; i++)
-                    {
-                        // 透過色が設定されているか確認
-                        if (palette.Entries[i].A == 0)
-                        {
-                            Color color = palette.Entries[i];
-                            return Color.FromArgb(255, color.R, color.G, color.B); // 透過色を返す
-                        }
-                    }
-                }
-            }*/
             //Graphic Control Extensionから取得
             if (image.RawFormat.Equals(ImageFormat.Gif) && filepath != "")
             {
@@ -353,25 +335,25 @@ namespace picview
             +----+----+---------+---------+---------+
             | base    | rotate  | L/R     | U/D     |
             +----+----+---------+---------+---------+
-            | 0  |○↑  | 1       | 4       | 6       |
+            | 0  |x↑  | 1       | 4       | 6       |
             +----+----+---------+---------+---------+
-            | 1  |○   | 2       | 5       | 7       |
+            | 1  |x   | 2       | 5       | 7       |
             |    |→   |         |         |         |
             +----+----+---------+---------+---------+
-            | 2  |↓○  | 3       | 6       | 4       |
+            | 2  |↓x  | 3       | 6       | 4       |
             +----+----+---------+---------+---------+
             | 3  |←   | 0       | 7       | 5       |
-            |    |○   |         |         |         |
+            |    |x   |         |         |         |
             +----+----+---------+---------+---------+
-            | 4  |↑○  | 7       | 0       | 2       |
+            | 4  |↑x  | 7       | 0       | 2       |
             +----+----+---------+---------+---------+
-            | 5  |○   | 4       | 1       | 3       |
+            | 5  |x   | 4       | 1       | 3       |
             |    |←   |         |         |         |
             +----+----+---------+---------+---------+
-            | 6  |○↓  | 5       | 2       | 0       |
+            | 6  |x↓  | 5       | 2       | 0       |
             +----+----+---------+---------+---------+
             | 7  |→   | 6       | 3       | 1       |
-            |    |○   |         |         |         |
+            |    |x   |         |         |         |
             +----+----+---------+---------+---------+
 
             Rotate180FlipNone  2  反転せずに時計回りに 180 度回転することを指定します。
@@ -554,6 +536,30 @@ namespace picview
 
         public class BorderWidth
         {
+            /*
+                        +------------------------------------+ -+-
+                        |         C:VirtualWindowArea        |  |<--- GapTop ----------+
+                        |   +----------------------------+   | -+-                     |
+                        |   |        B:WindowArea        |   |  |<--- Top ------+      |
+                        |   |   +--------------------+   |   | -+-              |      |
+                       GapLeft  |                    |  GapRight                |      |
+                        |<->|   |    A:ClientArea    |   |<->|                Height  GapHeight
+                        |   |Left                    Right   |                  |      |
+                        |   |<->|                    |<->|   |                  |      |
+                        |   |   +--------------------+   |   | -+-              |      |
+                        |   |        B:WindowArea        |   |  |<--- Bottom ---+      |
+                        |   +----------------------------+   | -+-                     |
+                        |         C:VirtualWindowArea        |  |<--- GapBottom -------+
+                        +------------------------------------+ -+-
+
+                          Left    + Right    = Width
+                          GapLeft + GapRight = GapWidth
+
+                    A:ClientArea（クライアント領域）
+                    B:WindowArea（ウィンドウ可視領域）
+                    C:VirtualWindowArea（ウィンドウ領域）
+            */
+
             //フォームのウィンドウ可視領域とクライアント領域の隙間
             public int Top { get; set; }
             public int Bottom { get; set; }
