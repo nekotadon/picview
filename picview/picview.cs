@@ -624,15 +624,15 @@ namespace picview
                 if (next && targetfileIndex < filelists.Count() - 1)//次へ移動の場合で今が最後のファイルでなければ
                 {
                     isAlreadySearched = true;
-                    indexOfFile = targetfileIndex;
-                    countOfFiles = filelists.Count();
+                    indexOfFile = targetfileIndex + (isTargetfileExist ? 1 : 0);
+                    countOfFiles = filelists.Count() - (isTargetfileExist ? 0 : 1);
                     ChangeFile(filelists[targetfileIndex + 1]);
                 }
                 else if (!next && 0 < targetfileIndex)//前へ移動の場合で今が最初のファイルでなければ
                 {
                     isAlreadySearched = true;
-                    indexOfFile = targetfileIndex;
-                    countOfFiles = filelists.Count();
+                    indexOfFile = targetfileIndex - 1;
+                    countOfFiles = filelists.Count() - (isTargetfileExist ? 0 : 1);
                     ChangeFile(filelists[targetfileIndex - 1]);
                 }
             }
@@ -812,18 +812,6 @@ namespace picview
                     }));
                 });
             }
-        }
-
-        //現在の拡大率
-        private double GetScale()
-        {
-            if (fileImageSize.Width == 0) return 1;
-            if (fileImageSize.Height == 0) return 1;
-
-            //拡大率
-            double rateX = (double)pictureBox.Width / fileImageSize.Width;
-            double rateY = (double)pictureBox.Height / fileImageSize.Height;
-            return Math.Min(rateX, rateY);
         }
 
         //タイトルバーの文字列設定
