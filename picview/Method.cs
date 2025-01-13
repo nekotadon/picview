@@ -222,7 +222,16 @@ namespace picview
                 string name1 = Path.GetFileNameWithoutExtension(s1);
                 string name2 = Path.GetFileNameWithoutExtension(s2);
 
-                return NativeMethods.StrCmpLogicalW(name1, name2);
+                int ret = NativeMethods.StrCmpLogicalW(name1, name2);
+
+                if (ret == 0)
+                {
+                    name1 = Path.GetExtension(s1);
+                    name2 = Path.GetExtension(s2);
+                    ret = NativeMethods.StrCmpLogicalW(name1, name2);
+                }
+
+                return ret;
             }
             catch (Exception)
             {

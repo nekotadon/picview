@@ -18,7 +18,7 @@ namespace picview
         //画像右クリック時のコンテキストメニュー
         private ContextMenuStrip contextMenuStrip = new ContextMenuStrip();
         //表示する画像ファイルのフルパス
-        private string filepath { get; set; }
+        private string filepath = "";
         //表示対象の拡張子
         private string[] pictureExt = { ".bmp", ".jpg", ".jpeg", ".png", ".gif" };
         //画像サイズ
@@ -366,6 +366,9 @@ namespace picview
         {
             mouseRightClick = false;
 
+            //ファイルが一度も読み込まれていなければ何もしない
+            if (firstImage || filepath == "") return;
+
             //コンテキストメニューが開いている場合は閉じる
             if (contextMenuStrip?.IsHandleCreated ?? false)
             {
@@ -378,170 +381,174 @@ namespace picview
                 return;
             }
 
-            //現在表示しているファイルが存在しているか確認
-            if (File.Exists(filepath))
+            //右マウスボタン押されながらホイール、またはCtrl押しながらホイールの場合は拡大縮小
+            if ((MouseButtons & MouseButtons.Right) == MouseButtons.Right || (ModifierKeys & Keys.Control) == Keys.Control)
             {
-                //右マウスボタン押されながらホイール、またはCtrl押しながらホイールの場合は拡大縮小
-                if ((MouseButtons & MouseButtons.Right) == MouseButtons.Right || (ModifierKeys & Keys.Control) == Keys.Control)
+                //現在表示しているファイルが存在しているか確認
+                if (!File.Exists(filepath)) return;
+
+                //拡大縮小
+                bool zoom = e.Delta > 0;//奥に回した場合拡大
+
+                //画像表示がある場合
+                if (isImageExist)
                 {
-                    //拡大縮小
-                    bool zoom = e.Delta > 0;//奥に回した場合拡大
+                    //拡大縮小率変更
+                    int zoomIndexCurrent = zoomIndex;//現在の拡大率配列インデックス
+                    zoomIndex += zoom ? 1 : -1;
 
-                    //画像表示がある場合
-                    if (isImageExist)
+                    //変更後の拡大率配列インデックス
+                    if (zoomIndex < 0)//最後まで縮小している場合は
                     {
-                        //拡大縮小率変更
-                        int zoomIndexCurrent = zoomIndex;//現在の拡大率配列インデックス
-                        zoomIndex += zoom ? 1 : -1;
+                        zoomIndex = 0;//最小縮小率に設定
+                    }
+                    if (zoomIndex > zoomRatioArray.Length - 1)//最後まで拡大している場合は
+                    {
+                        zoomIndex = zoomRatioArray.Length - 1;//最大拡大率に設定
+                    }
 
-                        //変更後の拡大率配列インデックス
-                        if (zoomIndex < 0)//最後まで縮小している場合は
-                        {
-                            zoomIndex = 0;//最小縮小率に設定
-                        }
-                        if (zoomIndex > zoomRatioArray.Length - 1)//最後まで拡大している場合は
-                        {
-                            zoomIndex = zoomRatioArray.Length - 1;//最大拡大率に設定
-                        }
+                    //変更後のサイズ
+                    if (zoomIndex != zoomIndexCurrent)//拡大縮小率が変更された場合
+                    {
+                        //変更前のマウス位置(pictureBox基準)
+                        Point pointMouse = panel.PointToClient(Cursor.Position);
+                        Point pointscroll = panel.AutoScrollPosition;
+                        double pointMouseAbsX = pointMouse.X - pointscroll.X;
+                        double pointMouseAbsY = pointMouse.Y - pointscroll.Y;
+                        /*
+                                ↓pictureBox(0,0)
+                                ┌───────┬──────────────────────┐
+                                │       │                      │
+                                │       │ - pointscroll.Y      │
+                                │       │   (always Y<0)       │
+                                │       ▼                      │
+                                ├──────>┌─────┬───────┐        │
+                       - pointscroll.X  │     │ pointMouse.Y   │
+                         (always X<0)   │     │       │        │
+                                │       │     ▼       │        │
+                                │       ├────>*       │        │ *:変更前のマウス位置(pictureBox基準)
+                                │       │pointMouse.X │        │
+                                │       │ Client Area │        │
+                                │       │ (View Area) │        │
+                                │       └─────────────┘        │
+                                │                              │
+                                │   pictureBox Area            │
+                                │   (Invisible Area)           │
+                                │                              │
+                                └──────────────────────────────┘
+                        */
 
-                        //変更後のサイズ
-                        if (zoomIndex != zoomIndexCurrent)//拡大縮小率が変更された場合
+                        //画面内に収まるようにクライアントサイズとpictureBoxサイズ調整。スクリーンに収まりきらない場合はtrueを返す
+                        bool isFixed = AutoAdjustSize(AjastType.Zoom);
+
+                        //ウィンドウ位置調整
+                        AutoAdjustLocation(ClientSize, Cursor.Position);
+
+                        //スクロールバーの位置調整
+                        if (panel.HorizontalScroll.Visible || panel.VerticalScroll.Visible)//スクロールバーが表示されている場合
                         {
-                            //変更前のマウス位置(pictureBox基準)
-                            Point pointMouse = panel.PointToClient(Cursor.Position);
-                            Point pointscroll = panel.AutoScrollPosition;
-                            double pointMouseAbsX = pointMouse.X - pointscroll.X;
-                            double pointMouseAbsY = pointMouse.Y - pointscroll.Y;
+                            //変更前からの拡大率（1超過なら拡大、1未満なら縮小）。例えば150→200であれば200/150=1.33倍
+                            double ratio = (double)zoomRatioArray[zoomIndex] / (double)zoomRatioArray[zoomIndexCurrent];
+
+                            //クライアント領域が変更されている可能性があるので再度取得
+                            pointMouse = panel.PointToClient(Cursor.Position);
+
+                            //変更後の位置
+                            double Sx = pointMouseAbsX;
+                            double Sxdash = Sx * ratio;
+                            double Cxdash = pointMouse.X;
+
+                            double Sy = pointMouseAbsY;
+                            double Sydash = Sy * ratio;
+                            double Cydash = pointMouse.Y;
+
+                            //pictureBox内のマウス位置は変更前後で同じになるようにスクロールバーの位置を設定
+                            double nextPointScrollX = Sxdash - Cxdash;
+                            double nextPointScrollY = Sydash - Cydash;
+                            panel.AutoScrollPosition = new Point((int)nextPointScrollX, (int)nextPointScrollY);
+
                             /*
-                                    ↓pictureBox(0,0)
-                                    ┌───────┬──────────────────────┐
-                                    │       │                      │
-                                    │       │ - pointscroll.Y      │
-                                    │       │   (always Y<0)       │
-                                    │       ▼                      │
-                                    ├──────>┌─────┬───────┐        │
-                           - pointscroll.X  │     │ pointMouse.Y   │
-                             (always X<0)   │     │       │        │
-                                    │       │     ▼       │        │
-                                    │       ├────>*       │        │ *:変更前のマウス位置(pictureBox基準)
-                                    │       │pointMouse.X │        │
-                                    │       │ Client Area │        │
-                                    │       │ (View Area) │        │
-                                    │       └─────────────┘        │
-                                    │                              │
-                                    │   pictureBox Area            │
-                                    │   (Invisible Area)           │
-                                    │                              │
-                                    └──────────────────────────────┘
+                                           Sx'
+                                |<────────────────│    ↓変更後のpictureBox
+                                ┌───────────────────────────────────── 
+                                │          Sx      
+                                │   |<────────────│    ↓変更前のpictureBox
+                                │   ┌──────────────────────────────┐  B   = - pointscroll.X(変更前)  取得時は負
+                                │   │             │                │  B'  = nextPointScrollX(変更後) 設定するときは正  
+                                │   │       ┌─────────────┐        │  Cx  = pointMouse.X
+                                │   │  Bx'  │ Cx' │       │        │  Sx  = Bx + Cx = pointMouseAbsX
+                                ├───├──────>├────>│       │        │  Sx' = Sx * ratio
+                                │   │  Bx   │ Cx  │       │        │      = pointMouseAbsX * ratio
+                                │   ├──────>├────>*       │        │
+                                │   │       │             │        │  Bx' = Sx' - Cx'
+                                │   │       │ Client Area │        │
+                                │   │       │ (View Area) │        │
+                                │   │       └─────────────┘        │
                             */
-
-                            //画面内に収まるようにクライアントサイズとpictureBoxサイズ調整。スクリーンに収まりきらない場合はtrueを返す
-                            bool isFixed = AutoAdjustSize(AjastType.Zoom);
-
-                            //ウィンドウ位置調整
-                            AutoAdjustLocation(ClientSize, Cursor.Position);
-
-                            //スクロールバーの位置調整
-                            if (panel.HorizontalScroll.Visible || panel.VerticalScroll.Visible)//スクロールバーが表示されている場合
-                            {
-                                //変更前からの拡大率（1超過なら拡大、1未満なら縮小）。例えば150→200であれば200/150=1.33倍
-                                double ratio = (double)zoomRatioArray[zoomIndex] / (double)zoomRatioArray[zoomIndexCurrent];
-
-                                //クライアント領域が変更されている可能性があるので再度取得
-                                pointMouse = panel.PointToClient(Cursor.Position);
-
-                                //変更後の位置
-                                double Sx = pointMouseAbsX;
-                                double Sxdash = Sx * ratio;
-                                double Cxdash = pointMouse.X;
-
-                                double Sy = pointMouseAbsY;
-                                double Sydash = Sy * ratio;
-                                double Cydash = pointMouse.Y;
-
-                                //pictureBox内のマウス位置は変更前後で同じになるようにスクロールバーの位置を設定
-                                double nextPointScrollX = Sxdash - Cxdash;
-                                double nextPointScrollY = Sydash - Cydash;
-                                panel.AutoScrollPosition = new Point((int)nextPointScrollX, (int)nextPointScrollY);
-
-                                /*
-                                               Sx'
-                                    |<────────────────│    ↓変更後のpictureBox
-                                    ┌───────────────────────────────────── 
-                                    │          Sx      
-                                    │   |<────────────│    ↓変更前のpictureBox
-                                    │   ┌──────────────────────────────┐  B   = - pointscroll.X(変更前)  取得時は負
-                                    │   │             │                │  B'  = nextPointScrollX(変更後) 設定するときは正  
-                                    │   │       ┌─────────────┐        │  Cx  = pointMouse.X
-                                    │   │  Bx'  │ Cx' │       │        │  Sx  = Bx + Cx = pointMouseAbsX
-                                    ├───├──────>├────>│       │        │  Sx' = Sx * ratio
-                                    │   │  Bx   │ Cx  │       │        │      = pointMouseAbsX * ratio
-                                    │   ├──────>├────>*       │        │
-                                    │   │       │             │        │  Bx' = Sx' - Cx'
-                                    │   │       │ Client Area │        │
-                                    │   │       │ (View Area) │        │
-                                    │   │       └─────────────┘        │
-                                */
-                            }
-
-                            //タイトル変更
-                            ChangeTitle();
                         }
-                    }
-                }
-                else//ただのスクロールであればファイル変更
-                {
-                    //次へ、前へ
-                    bool next = e.Delta < 0;//手前に回した場合次のファイルへ
 
-                    //現在の画像ファイルのあるフォルダ
-                    string folder = Path.GetDirectoryName(filepath);
-
-                    //フォルダの中のすべての画像ファイルを取得
-                    List<string> files = new List<string>();
-                    foreach (string file in Directory.GetFiles(folder, "*"))
-                    {
-                        string ext = Path.GetExtension(file).ToLower();
-                        if (pictureExt.Contains(ext))
-                        {
-                            files.Add(file);
-                        }
-                    }
-
-                    //ファイルを名前順でソート
-                    StringSort.Sort(ref files);
-
-                    //表示する画像の更新
-                    for (int i = 0; i < files.Count; i++)
-                    {
-                        //現在表示しているファイルが見つかった場合
-                        if (files[i] == filepath)
-                        {
-                            if (next)//次のファイルに移動する場合
-                            {
-                                if (i < files.Count - 1)//今のファイルが最後のファイルでなければ
-                                {
-                                    //表示画像変更
-                                    ChangeFile(files[i + 1]);
-                                    break;
-                                }
-                            }
-                            else//前のファイルに移動する場合
-                            {
-                                if (i > 0)//今のファイルが最初のファイルでなければ
-                                {
-                                    //表示画像変更
-                                    ChangeFile(files[i - 1]);
-                                    break;
-                                }
-                            }
-
-                            //今と同じファイルなら何もしない
-                            break;
-                        }
+                        //タイトル変更
+                        ChangeTitle();
                     }
                 }
             }
+            else//ただのスクロールであればファイル変更
+            {
+                //次へ、前へ
+                bool next = e.Delta < 0;//手前に回した場合次のファイルへ
+
+                //現在の画像ファイルのあるフォルダ
+                string folder = Path.GetDirectoryName(filepath);
+
+                //フォルダの中のすべての画像ファイルを取得
+                HashSet<string> hashfiles = new HashSet<string> { filepath };//今のファイルが削除されている可能性もあるので追加する
+                foreach (string file in Directory.GetFiles(folder, "*"))
+                {
+                    string ext = Path.GetExtension(file).ToLower();
+                    if (pictureExt.Contains(ext))
+                    {
+                        hashfiles.Add(file);
+                    }
+                }
+
+                //ファイルリスト
+                List<string> files = new List<string>(hashfiles);
+
+                //ファイルを名前順でソート
+                StringSort.Sort(ref files);
+                //MessageBox.Show(string.Join("\r\n", files.ToArray()));
+
+                //表示する画像の更新
+                for (int i = 0; i < files.Count; i++)
+                {
+                    //現在表示しているファイルが見つかった場合
+                    if (files[i] == filepath)
+                    {
+                        if (next)//次のファイルに移動する場合
+                        {
+                            if (i < files.Count - 1)//今のファイルが最後のファイルでなければ
+                            {
+                                //表示画像変更
+                                ChangeFile(files[i + 1]);
+                                break;
+                            }
+                        }
+                        else//前のファイルに移動する場合
+                        {
+                            if (i > 0)//今のファイルが最初のファイルでなければ
+                            {
+                                //表示画像変更
+                                ChangeFile(files[i - 1]);
+                                break;
+                            }
+                        }
+
+                        //今と同じファイルなら何もしない
+                        break;
+                    }
+                }
+            }
+
         }
 
         //ショートカットキーアクション
@@ -749,12 +756,24 @@ namespace picview
                         }
                     }
 
+                    //画像ファイルパス更新
+                    filepath = file;
+
+                    //画像削除
+                    if (pictureBox.Image != null)
+                    {
+                        pictureBox.Image.Dispose();
+                        pictureBox.Image = null;
+                    }
+                    if (animatedImage != null)
+                    {
+                        animatedImage.Dispose();
+                        animatedImage = null;
+                    }
+
                     //読み込みができた場合
                     if (newImage != null)
                     {
-                        //画像ファイルパス更新
-                        filepath = file;
-
                         //透過色を無効にして通常背景色にする
                         TransparencyKey = Color.Empty;
                         BackColor = pictureBox.BackColor = panel.BackColor = SystemColors.Control;
@@ -776,18 +795,6 @@ namespace picview
 
                         //アニメーションgifかどうか
                         bool animegif = ext == ".gif" && newImage.RawFormat.Equals(ImageFormat.Gif) && ImageAnimator.CanAnimate(newImage);
-
-                        //画像削除
-                        if (pictureBox.Image != null)
-                        {
-                            pictureBox.Image.Dispose();
-                            pictureBox.Image = null;
-                        }
-                        if (animatedImage != null)
-                        {
-                            animatedImage.Dispose();
-                            animatedImage = null;
-                        }
 
                         //画像更新
                         if (animegif)
