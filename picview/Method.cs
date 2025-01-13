@@ -1,0 +1,283 @@
+﻿using System;
+using System.IO;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.Windows.Forms;
+using System.Runtime.InteropServices;
+
+namespace picview
+{
+    public static class ImageUtil
+    {
+        //透過色取得
+        public static Color GetTransparentColor(Image image)
+        {
+            // 画像がGIFの場合
+            if (image.RawFormat.Equals(ImageFormat.Gif))
+            {
+                // GIFの場合、カラーパレットを確認
+                if (image.PixelFormat == PixelFormat.Format8bppIndexed)
+                {
+                    ColorPalette palette = ((Bitmap)image).Palette;
+                    for (int i = 0; i < palette.Entries.Length; i++)
+                    {
+                        // 透過色が設定されているか確認
+                        if (palette.Entries[i].A == 0)
+                        {
+                            Color color = palette.Entries[i];
+                            return Color.FromArgb(255, color.R, color.G, color.B); // 透過色を返す
+                        }
+                    }
+                }
+            }
+
+            //上記で判定できない場合
+            // ピクセルフォーマットを確認
+            if (image.PixelFormat == PixelFormat.Format16bppArgb1555 ||
+                image.PixelFormat == PixelFormat.Format32bppArgb)
+            {
+                if (image.Height <= 20 || image.Width <= 20)
+                {
+                    // 画像の各ピクセルを調べて透過色を探す
+                    for (int y = 0; y < image.Height; y++)
+                    {
+                        for (int x = 0; x < image.Width; x++)
+                        {
+                            Color pixelColor = ((Bitmap)image).GetPixel(x, y);
+                            // アルファ値が0のピクセルを見つけた場合
+                            if (pixelColor.A == 0)
+                            {
+                                Color color = pixelColor;
+                                return Color.FromArgb(255, color.R, color.G, color.B); // 透過色を返す
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    //4隅だけ確認
+                    bool y1st, x1st;
+                    y1st = x1st = true;
+                    for (int y = 0; y < image.Height; y++)
+                    {
+                        for (int x = 0; x < image.Width; x++)
+                        {
+                            Color pixelColor = ((Bitmap)image).GetPixel(x, y);
+                            // アルファ値が0のピクセルを見つけた場合
+                            if (pixelColor.A == 0)
+                            {
+                                Color color = pixelColor;
+                                return Color.FromArgb(255, color.R, color.G, color.B); // 透過色を返す
+                            }
+                            if (x == 10 && x1st)
+                            {
+                                x1st = false;
+                                x = image.Width - 10;
+                            }
+                        }
+                        if (y == 10 && y1st)
+                        {
+                            y1st = false;
+                            y = image.Height - 10;
+                        }
+                    }
+                }
+            }
+
+            return Color.Empty; // 透過色は設定されていない
+        }
+
+        //jpegの中の回転角度を確認
+        public static ushort GetExifOrientation(Image image)
+        {
+            foreach (PropertyItem prop in image.PropertyItems)
+            {
+                if (prop.Id == 0x0112) // OrientationのID
+                {
+                    return BitConverter.ToUInt16(prop.Value, 0);
+                }
+            }
+            return 1; // デフォルトは1（回転なし）
+        }
+
+        //jpegをExifをもとに回転指示作成
+        public static RotateFlipType GetRotateFlipType(ushort orientation)
+        {
+            switch (orientation)
+            {
+                case 1: // Normal
+                    return RotateFlipType.RotateNoneFlipNone;
+                case 3: // 180度回転
+                    return RotateFlipType.Rotate180FlipNone;
+                case 6: // 90度時計回り
+                    return RotateFlipType.Rotate90FlipNone;
+                case 8: // 90度反時計回り
+                    return RotateFlipType.Rotate270FlipNone;
+                case 2: // 水平反転
+                    return RotateFlipType.RotateNoneFlipX;
+                case 4: // 垂直反転
+                    return RotateFlipType.RotateNoneFlipY;
+                case 5: // 水平反転 + 90度時計回り
+                    return RotateFlipType.Rotate90FlipX;
+                case 7: // 水平反転 + 90度反時計回り
+                    return RotateFlipType.Rotate270FlipX;
+                default:
+                    return RotateFlipType.RotateNoneFlipNone;
+            }
+        }
+    }
+
+    //ファイル名を自然順でソートするためのクラス
+    public static class StringSort
+    {
+        //文字列比較用Win32API
+        internal static class NativeMethods
+        {
+            /*
+            文字列が同一の場合は 0
+            s1 が指す文字列の値が s2 が指す文字列より大きい場合は、1
+            s1 が指す文字列の値が s2 が指す値より小さい場合、-1
+            */
+            [DllImport("shlwapi.dll", CharSet = CharSet.Unicode)]
+            internal static extern int StrCmpLogicalW(string str1, string str2);
+        }
+
+        //ソートアルゴリズム
+        //s1,s2の順番にしたい場合は-1、s2,s1の順番にしたい場合は1、同じ場合は0
+        private static int StringComparer(string s1, string s2)
+        {
+            try
+            {
+                string name1 = Path.GetFileNameWithoutExtension(s1);
+                string name2 = Path.GetFileNameWithoutExtension(s2);
+
+                return NativeMethods.StrCmpLogicalW(name1, name2);
+            }
+            catch (Exception)
+            {
+                return 0;
+            }
+        }
+
+        //ソートメソッド
+        public static void Sort(ref List<string> lists)
+        {
+            lists.Sort(StringComparer);
+        }
+    }
+
+    //ウィンドウ領域取得
+    public static class WindowSizeMethod
+    {
+        private const uint DWMWA_EXTENDED_FRAME_BOUNDS = 9;
+
+        private struct RECT
+        {
+            public int left;
+            public int top;
+            public int right;
+            public int bottom;
+        }
+
+        private static class NativeMethods
+        {
+            [DllImport("dwmapi.dll")]
+            internal static extern int DwmGetWindowAttribute(IntPtr hWnd, uint dwAttribute, out RECT pvAttribute, int cbAttribute);
+        }
+
+        /// <summary>
+        /// フォームのスクリーン座標でのクライアント領域
+        /// </summary>
+        /// <param name="form"></param>
+        /// <returns></returns>
+        public static Rectangle GetClientArea(Form form)
+        {
+            return form.RectangleToScreen(form.ClientRectangle);
+        }
+
+        /// <summary>
+        /// フォームのスクリーン座標でのウィンドウ領域
+        /// </summary>
+        /// <param name="form"></param>
+        /// <returns></returns>
+        public static Rectangle GetVirtualWindowArea(Form form)
+        {
+            return form.Bounds;
+        }
+
+        /// <summary>
+        /// フォームのスクリーン座標でのウィンドウ可視領域
+        /// </summary>
+        /// <param name="form"></param>
+        /// <returns></returns>
+        public static Rectangle? GetWindowArea(Form form)
+        {
+            if (form?.IsHandleCreated ?? false)
+            {
+                RECT rect;
+                int ret = NativeMethods.DwmGetWindowAttribute(form.Handle, DWMWA_EXTENDED_FRAME_BOUNDS, out rect, Marshal.SizeOf(typeof(RECT)));
+                if (ret == 0)
+                {
+                    return new Rectangle(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
+                }
+            }
+
+            return null;
+        }
+
+        public class BorderWidth
+        {
+            //フォームのウィンドウ可視領域とクライアント領域の隙間
+            public int Top { get; set; }
+            public int Bottom { get; set; }
+            public int Left { get; set; }
+            public int Right { get; set; }
+            public int Height => Top + Bottom;
+            public int Width => Left + Right;
+
+            //フォームのウィンドウ領域とウィンドウ領域可視の隙間
+            public int GapTop { get; set; }
+            public int GapBottom { get; set; }
+            public int GapLeft { get; set; }
+            public int GapRight { get; set; }
+            public int GapHeight => GapTop + GapBottom;
+            public int GapWidth => GapLeft + GapWidth;
+
+            public BorderWidth()
+            {
+                Top = Bottom = Left = Right = GapTop = GapBottom = GapLeft = GapRight = 0;
+            }
+        }
+
+        public static BorderWidth GetBorderWidth(Form form)
+        {
+            BorderWidth border = new BorderWidth();
+
+            //ボーダーサイズ
+            Rectangle virtualWindowArea = GetVirtualWindowArea(form);
+            Rectangle? windowArea = GetWindowArea(form);
+            Rectangle clientArea = GetClientArea(form);
+
+            border.Top = clientArea.Y - (windowArea?.Y ?? virtualWindowArea.Y);
+            border.Left = clientArea.X - (windowArea?.X ?? virtualWindowArea.X);
+            border.Right = (windowArea?.Width ?? virtualWindowArea.Width) - clientArea.Width - border.Left;
+            border.Bottom = (windowArea?.Height ?? virtualWindowArea.Height) - clientArea.Height - border.Top;
+            border.GapLeft = (windowArea?.X - virtualWindowArea.X) ?? 0;
+            border.GapTop = (windowArea?.Y - virtualWindowArea.Y) ?? 0;
+            border.GapRight = (virtualWindowArea.X + virtualWindowArea.Width - (windowArea?.X + windowArea?.Width)) ?? 0;
+            border.GapBottom = (virtualWindowArea.Y + virtualWindowArea.Height - (windowArea?.Y + windowArea?.Height)) ?? 0;
+
+            return border;
+        }
+    }
+
+    //マウスホイールを無効化しただけのパネル
+    public class PanelEx : Panel
+    {
+        protected override void OnMouseWheel(MouseEventArgs e)
+        {
+            ;//何もしない
+        }
+    }
+}

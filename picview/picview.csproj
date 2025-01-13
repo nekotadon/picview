@@ -46,6 +46,7 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Method.cs" />
     <Compile Include="picview.cs">
       <SubType>Form</SubType>
     </Compile>
