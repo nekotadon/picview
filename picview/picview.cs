@@ -6,6 +6,7 @@ using System.Drawing.Imaging;
 using System.Linq;
 using System.Windows.Forms;
 using System.Threading.Tasks;
+using System.Diagnostics;
 
 namespace picview
 {
@@ -56,6 +57,12 @@ namespace picview
         private bool force100per = false;//初期状態では常に100%表示
         //その他
         int DToI(double value) => (int)Math.Round(value);//doubleをintに変換
+        //外部ツールで開く
+        int toolNum = 10;
+        List<string> toolNames = new List<string>();
+        List<string> tools = new List<string>();
+        List<string> toolArgs = new List<string>();
+        List<bool> toolExits = new List<bool>();
 
         public picview()
         {
@@ -74,6 +81,14 @@ namespace picview
 
             force100per = iniFile.GetKeyValueBool("setting", "force100per", false, true);
             mouseCenterMove = iniFile.GetKeyValueBool("setting", "mouseCenterMove", false, true);
+
+            for (int i = 0; i < toolNum; i++)
+            {
+                toolNames.Add(iniFile.GetKeyValueString("tool", "Name" + i.ToString(), true));
+                tools.Add(iniFile.GetKeyValueString("tool", "tool" + i.ToString(), true));
+                toolArgs.Add(iniFile.GetKeyValueString("tool", "arg" + i.ToString(), true));
+                toolExits.Add(iniFile.GetKeyValueBool("tool", "exit" + i.ToString(), true, true));
+            }
 
             //Form
             MaximizeBox = false;
@@ -133,6 +148,7 @@ namespace picview
             pictureBox.MouseMove += (sender, e) => pictureBox_MouseMove(sender, e);
             pictureBox.MouseUp += (sender, e) => pictureBox_MouseUp(sender, e);
             pictureBox.MouseWheel += (sender, e) => pictureBox_MouseWheel(sender, e);
+            pictureBox.MouseDoubleClick += (sender, e) => pictureBox_MouseDoubleClick(sender, e);
             pictureBox.Paint += OnPaintforAnimation;
             typeof(PictureBox).GetProperty("DoubleBuffered", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).SetValue(pictureBox, true, null);
             panel.Controls.Add(pictureBox);
@@ -635,6 +651,115 @@ namespace picview
                     countOfFiles = filelists.Count() - (isTargetfileExist ? 0 : 1);
                     ChangeFile(filelists[targetfileIndex - 1]);
                 }
+            }
+        }
+
+        //ダブルクリックで外部ツールを起動
+        private void pictureBox_MouseDoubleClick(object sender, MouseEventArgs e)
+        {
+            //外部ツールが登録されているか
+            bool isToolExist = false;
+            foreach (var tool in tools)
+            {
+                if (tool != "")
+                {
+                    isToolExist = true;
+                    break;
+                }
+            }
+
+            if (!isToolExist) return;
+
+            //コンテキストメニュー作成
+            ContextMenuStrip contextMenuStripTools = new ContextMenuStrip();
+
+            //サブメニュー
+            int numOfSubMenu = 0;
+            string lastTool = "";
+            string lastArgs = "";
+            bool lastExit = false;
+            for (int i = 0; i < toolNum; i++)
+            {
+                if (tools[i] != "")
+                {
+                    //設定情報取得
+                    string toolName = toolNames[i];
+                    string tool = tools[i];
+                    string toolArg = toolArgs[i];
+                    bool toolExit = toolExits[i];
+
+                    //メニュー名
+                    string menuName = toolName;
+
+                    //ツールのフルパス
+                    string toolPath = "";
+                    try
+                    {
+                        //ツールのフルパス取得
+                        toolPath = Path.GetFullPath(Environment.ExpandEnvironmentVariables(tools[i]));
+
+                        //メニュー名の設定がなければ
+                        if (menuName == "")
+                        {
+                            //ツール名をメニュー名にする
+                            menuName = Path.GetFileNameWithoutExtension(toolPath);
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        toolPath = "";
+                    }
+
+                    //引数の{FILE}を画像ファイルに置き換え
+                    if (toolArg.Contains("{FILE}"))
+                    {
+                        toolArg = toolArg.Replace("{FILE}", File.Exists(filepath) ? ("\"" + filepath + "\"") : "");
+                    }
+
+                    //ツールのフルパスがある場合
+                    if (toolPath != "" && menuName != "")
+                    {
+                        //サブメニュー数を数える
+                        numOfSubMenu++;
+
+                        //サブメニュー作成
+                        ToolStripMenuItem toolStripMenuItem = new ToolStripMenuItem
+                        {
+                            Text = menuName,
+                            Enabled = File.Exists(toolPath)//ツールが存在しなければグレーアウト
+                        };
+                        toolStripMenuItem.Click += (x, y) =>
+                        {
+                            Process.Start(toolPath, toolArg);
+                            if (toolExit)
+                            {
+                                Application.Exit();
+                            }
+                        };
+                        contextMenuStripTools.Items.Add(toolStripMenuItem);
+
+                        //最後のツール
+                        lastTool = toolPath;
+                        lastArgs = toolArg;
+                        lastExit = toolExit;
+                    }
+                }
+            }
+
+            //メニュー表示
+            if (numOfSubMenu == 1 && File.Exists(lastTool))//メニューが１つかつツールが存在する場合
+            {
+                //直接そのツールを実行
+                Process.Start(lastTool, lastArgs);
+                if (lastExit)
+                {
+                    Application.Exit();
+                }
+            }
+            else if (numOfSubMenu > 0)//メニューが複数個ある場合
+            {
+                //コンテキストメニュー表示
+                contextMenuStripTools.Show(Cursor.Position);
             }
         }
 
