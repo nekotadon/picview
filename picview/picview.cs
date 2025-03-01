@@ -1017,10 +1017,10 @@ namespace picview
                         //透過色が有効な画像フォーマットの場合で透過色がある場合
                         if (ext == ".gif" || ext == ".png")
                         {
-                            (bool isTrans, Color transColor) = ImageUtil.GetTransparentColor(newImage, filepath);
+                            (bool isTransColorExist, Color transColor, bool isFileCorrect) = ImageUtil.GetTransparentColor(newImage, filepath);
 
                             //背景を透明にする
-                            if (isTrans)
+                            if (isTransColorExist)
                             {
                                 //背景を透明にする
                                 if (transColor != Color.Empty)

@@ -11,10 +11,45 @@ namespace picview
 {
     public static class ImageUtil
     {
-        //透過色取得
-        public static (bool isTrans, Color transColor) GetTransparentColor(Image image, string filepath = "")
+        //CRC32計算
+        public static class Crc32
         {
-            bool ret = false;
+            private static readonly uint[] CrcTable;
+
+            static Crc32()
+            {
+                CrcTable = new uint[256];
+                const uint polynomial = 0xEDB88320;
+                for (uint i = 0; i < 256; i++)
+                {
+                    uint crc = i;
+                    for (int j = 0; j < 8; j++)
+                    {
+                        crc = (crc & 1) == 1 ? (polynomial ^ (crc >> 1)) : (crc >> 1);
+                    }
+                    CrcTable[i] = crc;
+                }
+            }
+
+            public static uint CalculateCrc32(byte[] data)
+            {
+                uint crc = 0xFFFFFFFF;
+                foreach (byte b in data)
+                {
+                    byte index = (byte)((crc ^ b) & 0xFF);
+                    crc = (crc >> 8) ^ CrcTable[index];
+                }
+                return ~crc;
+            }
+        }
+
+        //透過色取得
+        public static (bool isTransColorExist, Color transColor, bool isFileCorrect) GetTransparentColor(Image image, string filepath = "")
+        {
+            bool isTransColorExist = false;
+            Color transColor = Color.Empty;
+            bool isFileCorrect = true;
+
             // 画像がGIFの場合
             //Graphic Control Extensionから取得
             if (image.RawFormat.Equals(ImageFormat.Gif) && filepath != "")
@@ -31,7 +66,7 @@ namespace picview
                         {
                             byte[] buffer = { };
 
-                            //読み取り
+                            //読み取り用関数
                             Func<int, bool> ReadCheck = bytesnum =>
                             {
                                 buffer = reader.ReadBytes(bytesnum);
@@ -39,27 +74,37 @@ namespace picview
                             };
 
                             //残りのヘッダー読み込み
+                            //Logical Screen Width(2),Logical Screen Height(2),Packed Fields(1),Background Color Index(1),Pixel Aspect Ratio(1)
                             if (!ReadCheck(7))
                             {
-                                return (false, Color.Empty);
+                                return (false, Color.Empty, false);
                             }
 
-                            //パレット個数
+                            //Global Color Table Flag
+                            bool globalColorTableFlag = (buffer[4] & 0b10000000) != 0;
+
+                            //Size of Global Color Table
                             int size = 1;
                             for (int i = 0; i <= (buffer[4] & 0b111); i++)
                             {
                                 size *= 2;
                             }
 
-                            //共通パレット
-                            byte[] palettes = reader.ReadBytes(size * 3);
-                            if (palettes.Length != size * 3)
+                            //Global Color Table
+                            byte[] palettes = { };
+                            if (globalColorTableFlag)
                             {
-                                return (false, Color.Empty);
+                                palettes = reader.ReadBytes(size * 3);
+                                if (palettes.Length != size * 3)
+                                {
+                                    return (false, Color.Empty, false);
+                                }
                             }
 
+                            //Block読み込み
                             while (fs.Position < fs.Length)
                             {
+                                //最後の1バイトは0x3B
                                 if (fs.Position == fs.Length - 1)
                                 {
                                     buffer = reader.ReadBytes(1);
@@ -67,36 +112,43 @@ namespace picview
                                     {
                                         break;
                                     }
+                                    else
+                                    {
+                                        isFileCorrect = false;
+                                    }
                                 }
 
                                 buffer = reader.ReadBytes(2);
                                 if (BitConverter.ToString(buffer) == "21-F9")//Graphic Control Extension
                                 {
-                                    if (!ReadCheck(6))
+                                    if (!ReadCheck(6))//Block Size(1),Packed Fields(1),Delay Time(2),Transparent Color Index(1),Block Terminator(1)
                                     {
-                                        return (false, Color.Empty);
+                                        return (false, Color.Empty, false);
                                     }
-                                    if ((buffer[1] & 0x01) == 0)
+                                    if ((buffer[1] & 0x01) == 0)//透過色がない場合
                                     {
-                                        return (false, Color.Empty);
+                                        isTransColorExist = false;
                                     }
 
+                                    //Transparent Color Index
                                     int index = buffer[4];
 
-                                    if (index < size)
+                                    if (globalColorTableFlag && index < size)
                                     {
                                         int r = palettes[index * 3 + 0];
                                         int g = palettes[index * 3 + 1];
                                         int b = palettes[index * 3 + 2];
-                                        return (true, Color.FromArgb(255, r, g, b));//RGBの透過色
+
+                                        isTransColorExist = true;
+                                        transColor = Color.FromArgb(255, r, g, b);//RGBの透過色
                                     }
                                 }
                                 else if (BitConverter.ToString(buffer).StartsWith("2C"))//Image Block
                                 {
-                                    //Image Block Header
-                                    if (!ReadCheck(8))
+                                    //Image Block Header(Image Left Positionの先頭1バイトはすでに読み込み済み)
+                                    if (!ReadCheck(8))//Image Left Position(2),Image Top Position(2),Image Width(2),Image Height(2),Packed Fields(1)
                                     {
-                                        return (false, Color.Empty);
+                                        return (false, Color.Empty, false);
                                     }
                                     if ((buffer[7] & 0b10000000) != 0)
                                     {
@@ -117,7 +169,7 @@ namespace picview
                                     {
                                         if (!ReadCheck(1))
                                         {
-                                            return (false, Color.Empty);
+                                            return (false, Color.Empty, false);
                                         }
                                         if (buffer[0] == 0)
                                         {
@@ -131,17 +183,28 @@ namespace picview
                                 }
                                 else if (BitConverter.ToString(buffer) == "21-FE")//Comment Extension
                                 {
-                                    if (!ReadCheck(1))
+                                    //Data
+                                    for (; fs.Position < fs.Length;)
                                     {
-                                        return (false, Color.Empty);
+                                        if (!ReadCheck(1))
+                                        {
+                                            return (false, Color.Empty, false);
+                                        }
+                                        if (buffer[0] == 0)
+                                        {
+                                            break;
+                                        }
+                                        else
+                                        {
+                                            fs.Seek(buffer[0], SeekOrigin.Current);
+                                        }
                                     }
-                                    fs.Seek(buffer[0] + 1, SeekOrigin.Current);
                                 }
                                 else if (BitConverter.ToString(buffer) == "21-01")//Plain Text Extension
                                 {
                                     if (!ReadCheck(13))
                                     {
-                                        return (false, Color.Empty);
+                                        return (false, Color.Empty, false);
                                     }
 
                                     //Data
@@ -149,7 +212,7 @@ namespace picview
                                     {
                                         if (!ReadCheck(1))
                                         {
-                                            return (false, Color.Empty);
+                                            return (false, Color.Empty, false);
                                         }
                                         if (buffer[0] == 0)
                                         {
@@ -165,7 +228,7 @@ namespace picview
                                 {
                                     if (!ReadCheck(12))
                                     {
-                                        return (false, Color.Empty);
+                                        return (false, Color.Empty, false);
                                     }
 
                                     //Data
@@ -173,7 +236,7 @@ namespace picview
                                     {
                                         if (!ReadCheck(1))
                                         {
-                                            return (false, Color.Empty);
+                                            return (false, Color.Empty, false);
                                         }
                                         if (buffer[0] == 0)
                                         {
@@ -187,7 +250,7 @@ namespace picview
                                 }
                                 else
                                 {
-                                    return (false, Color.Empty);
+                                    return (false, Color.Empty, false);
                                 }
                             }
                         }
@@ -197,80 +260,124 @@ namespace picview
 
             //PNGの場合
             //IHDRチャンクとtRNSチャンクから確認
-            if (image.RawFormat.Equals(ImageFormat.Png) && filepath != "")
+            if (File.Exists(filepath))
             {
-                if (File.Exists(filepath))
+                using (FileStream fs = new FileStream(filepath, FileMode.Open, FileAccess.Read))
                 {
-                    using (FileStream fs = new FileStream(filepath, FileMode.Open, FileAccess.Read))
+                    BinaryReader reader = new BinaryReader(fs);
+
+                    string type = "";
+
+                    // PNGファイルのシグネチャを確認
+                    byte[] signature = reader.ReadBytes(8);
+                    if (BitConverter.ToString(signature) == "89-50-4E-47-0D-0A-1A-0A")
                     {
-                        BinaryReader reader = new BinaryReader(fs);
-
-                        // PNGファイルのシグネチャを確認
-                        byte[] signature = reader.ReadBytes(8);
-                        if (BitConverter.ToString(signature) == "89-50-4E-47-0D-0A-1A-0A")
+                        //チャング
+                        byte[] chunkLength;//長さ(4バイト)
+                        byte[] chunkType;//タイプ(4バイト)
+                        byte[] chunkData;//データ
+                        byte[] chunkCRC32;//CRC32(4バイト)
+                        int colorType = -1;
+                        while (fs.Position < fs.Length)
                         {
-                            //チャング
-                            byte[] buffer;
-                            int colorType = -1;
-                            while (fs.Position < fs.Length)
+                            string textData = "";
+
+                            //チャングのデータ長
+                            chunkLength = reader.ReadBytes(4);
+                            uint length = BitConverter.ToUInt32(chunkLength.Reverse().ToArray(), 0);
+
+                            //チャンクの種類
+                            chunkType = reader.ReadBytes(4);
+                            type = System.Text.Encoding.ASCII.GetString(chunkType);
+
+                            //チャンクのデータ
+                            chunkData = reader.ReadBytes((int)length);
+
+                            if (type == "IHDR")
                             {
-                                //チャングのデータ長
-                                buffer = reader.ReadBytes(4);
-                                uint chunkLength = BitConverter.ToUInt32(buffer.Reverse().ToArray(), 0);
-
-                                //チャンクの種類
-                                string chunkType = new string(reader.ReadChars(4));
-
-                                if (chunkType == "IHDR")
+                                //画像の幅(4),画像の高さ(4),色深度(1バイト),カラータイプ(1),圧縮形式(1),フィルタ形式(1),インターレース形式(1)
+                                colorType = chunkData[9];
+                                if (colorType == 4 || colorType == 6)//アルファ画像
                                 {
-                                    //画像の幅(4),画像の高さ(4),色深度(1バイト),カラータイプ(1),圧縮形式(1),フィルタ形式(1),インターレース形式(1),CRC(4)
-                                    buffer = reader.ReadBytes(17);
-                                    colorType = buffer[9];
-                                    if (colorType == 4 || colorType == 6)//アルファ画像
-                                    {
-                                        ret = true;
-                                    }
-                                }
-                                else if (chunkType == "tRNS")
-                                {
-                                    buffer = reader.ReadBytes((int)chunkLength + 4);
-
-                                    if (colorType == 3)//インデックスカラー
-                                    {
-                                        //処理が大変なので対応しない
-                                    }
-                                    else if (colorType == 0)//グレースケール
-                                    {
-                                        if (buffer.Length >= 2)
-                                        {
-                                            int gray = BitConverter.ToUInt16(buffer.Take(2).Reverse().ToArray(), 0);
-                                            return (true, Color.FromArgb(255, gray, gray, gray));//グレースケールの透過色
-                                        }
-                                    }
-                                    else if (colorType == 2)//フルカラー
-                                    {
-                                        if (buffer.Length >= 6)
-                                        {
-                                            int r = BitConverter.ToUInt16(buffer.Take(2).Reverse().ToArray(), 0);
-                                            int g = BitConverter.ToUInt16(buffer.Skip(2).Take(2).Reverse().ToArray(), 0);
-                                            int b = BitConverter.ToUInt16(buffer.Skip(4).Take(2).Reverse().ToArray(), 0);
-                                            return (true, Color.FromArgb(255, r, g, b));//RGBの透過色
-                                        }
-                                    }
-                                    break;
-                                }
-                                else
-                                {
-                                    // 次のチャンクへ
-                                    fs.Seek(chunkLength + 4, SeekOrigin.Current);//データ長+CRC4バイト分移動
+                                    isTransColorExist = true;
                                 }
                             }
+                            else if (type == "tRNS")
+                            {
+                                if (colorType == 3)//インデックスカラー
+                                {
+                                    //処理が大変なので対応しない
+                                }
+                                else if (colorType == 0)//グレースケール
+                                {
+                                    if (chunkData.Length >= 2)
+                                    {
+                                        int gray = BitConverter.ToUInt16(chunkData.Take(2).Reverse().ToArray(), 0);
+
+                                        isTransColorExist = true;
+                                        transColor = Color.FromArgb(255, gray, gray, gray);//グレースケールの透過色
+                                    }
+                                }
+                                else if (colorType == 2)//フルカラー
+                                {
+                                    if (chunkData.Length >= 6)
+                                    {
+                                        int r = BitConverter.ToUInt16(chunkData.Take(2).Reverse().ToArray(), 0);
+                                        int g = BitConverter.ToUInt16(chunkData.Skip(2).Take(2).Reverse().ToArray(), 0);
+                                        int b = BitConverter.ToUInt16(chunkData.Skip(4).Take(2).Reverse().ToArray(), 0);
+
+                                        isTransColorExist = true;
+                                        transColor = Color.FromArgb(255, r, g, b);//RGBの透過色
+                                    }
+                                }
+                            }
+                            else if (type == "tEXt")
+                            {
+                                //0x00をSpaceに変換
+                                byte[] revisedData = chunkData.Select(x => x == 0x00 ? (byte)0x20 : x).ToArray();
+
+                                //ISO 8859-1
+                                System.Text.Encoding enc = System.Text.Encoding.GetEncoding(28591);
+
+                                //文字列取得
+                                textData = enc.GetString(revisedData);
+
+                                //正しく文字列変換されなかった場合はASCIIとして読み込み
+                                if (enc.GetBytes(textData) != revisedData)
+                                {
+                                    byte[] revisedDataWord = revisedData.Where(x => (0x20 <= x && x <= 0x7e) || x == 0x0d || x == 0x0a || x == 0x09).ToArray();
+
+                                    if (BitConverter.ToString(revisedData) != BitConverter.ToString(revisedDataWord))
+                                    {
+                                        revisedData = chunkData.Select(x => (0x20 <= x && x <= 0x7e) ? x : (byte)0x20).ToArray();
+                                    }
+                                    textData = System.Text.Encoding.ASCII.GetString(revisedData);
+                                }
+                            }
+
+                            //チャンクのCRC
+                            chunkCRC32 = reader.ReadBytes(4);
+
+                            //CRC計算
+                            byte[] data = chunkType.Concat(chunkData).ToArray();
+                            uint crcValue = Crc32.CalculateCrc32(data);
+
+                            //CRCチェック
+                            if (crcValue.ToString("X8") != BitConverter.ToString(chunkCRC32).Replace("-", ""))
+                            {
+                                isFileCorrect = false;
+                            }
+                        }
+
+                        if (type != "IEND")
+                        {
+                            isFileCorrect = false;
                         }
                     }
                 }
             }
 
-            return (ret, Color.Empty); // 透過色は設定されていない
+            return (isTransColorExist, transColor, isFileCorrect);
         }
 
         //修正透過色の取得
