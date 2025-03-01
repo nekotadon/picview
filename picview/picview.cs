@@ -1040,9 +1040,6 @@ namespace picview
                         //アニメーションgifかどうか
                         bool animegif = ext == ".gif" && newImage.RawFormat.Equals(ImageFormat.Gif) && ImageAnimator.CanAnimate(newImage);
 
-                        //事前にリフレッシュ
-                        pictureBox.Refresh();
-
                         //画像更新
                         if (animegif)
                         {
